@@ -36,6 +36,6 @@ public final class PlayerLookup {
             return false;
         }
 
-        return target.isTrackedBy(viewer);
+        return target.getTrackedBy().contains(viewer);
     }
 }
