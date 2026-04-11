@@ -19,7 +19,7 @@ public final class PlayerPositionHandler implements PacketHandler {
     @Override
     public void handle(@NotNull PacketSendEvent event) {
         final Player player = event.getPlayer();
-        
+
         // Refresh the player's own tag after position change
         this.tagManager.hidePlayerTag(player, player);
         this.tagManager.showPlayerTag(player, player);

@@ -2,15 +2,17 @@ package com.github.groundbreakingmc.moderntags.manager;
 
 import com.github.groundbreakingmc.moderntags.ModernTags;
 import com.github.groundbreakingmc.moderntags.config.model.TagTemplate;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitTask;
+
+import java.util.concurrent.TimeUnit;
 
 public final class UpdateScheduler {
 
     private final ModernTags plugin;
     private final PlayerTagManager tagManager;
-    private BukkitTask updateTask;
+    private ScheduledTask updateTask;
 
     public UpdateScheduler(ModernTags plugin, PlayerTagManager tagManager) {
         this.plugin = plugin;
@@ -18,11 +20,12 @@ public final class UpdateScheduler {
     }
 
     public void start() {
-        this.updateTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
+        this.updateTask = Bukkit.getAsyncScheduler().runAtFixedRate(
                 this.plugin,
-                this::tick,
+                task -> tick(),
                 1L,
-                1L
+                1L,
+                TimeUnit.MILLISECONDS
         );
     }
 

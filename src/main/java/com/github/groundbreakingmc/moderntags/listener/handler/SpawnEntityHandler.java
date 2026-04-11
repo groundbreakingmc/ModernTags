@@ -11,6 +11,7 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Handles SPAWN_ENTITY packets to show player tags when players spawn for viewers.
@@ -41,12 +42,12 @@ public final class SpawnEntityHandler implements PacketHandler {
 
         final Player packetReceiver = event.getPlayer();
         final Player spawnedPlayer = Bukkit.getPlayer(uniqueId);
-        
+
         if (spawnedPlayer != null) {
             // Schedule for later to ensure both players are fully loaded for each other
-            Bukkit.getScheduler().runTaskLaterAsynchronously(this.plugin, () -> {
+            Bukkit.getAsyncScheduler().runDelayed(this.plugin, (task) -> {
                 this.tagManager.showPlayerTag(spawnedPlayer, packetReceiver);
-            }, 1L);
+            }, 1L, TimeUnit.MILLISECONDS);
         }
     }
 }

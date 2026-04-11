@@ -22,7 +22,7 @@ public final class DisconnectHandler implements PacketHandler {
     @Override
     public void handle(@NotNull PacketSendEvent event) {
         final Player player = event.getPlayer();
-        
+
         this.tagManager.cleanup(player);
         this.placeholderParser.cleanup(player);
     }

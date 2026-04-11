@@ -22,13 +22,13 @@ public final class PlayerInfoUpdateHandler implements PacketHandler {
     @Override
     public void handle(@NotNull PacketSendEvent event) {
         final var packet = new WrapperPlayServerPlayerInfoUpdate(event);
-        
+
         if (packet.getEntries().isEmpty()) {
             return;
         }
 
         final var actions = packet.getActions();
-        
+
         if (actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER)) {
             this.handleAddPlayer(packet, event.getPlayer());
         } else if (actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE)) {
@@ -39,7 +39,7 @@ public final class PlayerInfoUpdateHandler implements PacketHandler {
     private void handleAddPlayer(@NotNull WrapperPlayServerPlayerInfoUpdate packet, @NotNull Player viewer) {
         final var playerInfo = packet.getEntries().get(0);
         final Player target = Bukkit.getPlayer(playerInfo.getGameProfile().getUUID());
-        
+
         if (target != null) {
             this.tagManager.showPlayerTag(target, viewer);
         }
@@ -48,7 +48,7 @@ public final class PlayerInfoUpdateHandler implements PacketHandler {
     private void handleGameModeUpdate(@NotNull WrapperPlayServerPlayerInfoUpdate packet, @NotNull Player viewer) {
         final var playerInfo = packet.getEntries().get(0);
         final Player target = Bukkit.getPlayer(playerInfo.getGameProfile().getUUID());
-        
+
         if (target == null) {
             return;
         }

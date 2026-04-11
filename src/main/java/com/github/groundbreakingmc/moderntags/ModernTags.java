@@ -8,6 +8,7 @@ import com.github.groundbreakingmc.moderntags.manager.UpdateScheduler;
 import com.github.groundbreakingmc.moderntags.text.PlaceholderParser;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerCommon;
+import io.papermc.paper.threadedregions.scheduler.AsyncScheduler;
 import net.milkbowl.vault.chat.Chat;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -41,11 +42,11 @@ public final class ModernTags extends JavaPlugin {
 
         this.getCommand("moderntags").setExecutor(new ReloadCommand(this));
 
-        final BukkitScheduler scheduler = super.getServer().getScheduler();
+        final AsyncScheduler scheduler = super.getServer().getAsyncScheduler();
 
-        scheduler.runTaskAsynchronously(this, this.tagManager::initializeAll);
+        scheduler.runNow(this, task -> this.tagManager.initializeAll());
 
-        scheduler.runTask(this, () -> {
+        scheduler.runNow(this, (task) -> {
             final RegisteredServiceProvider<Chat> registration = super.getServer().getServicesManager().getRegistration(Chat.class);
             if (registration != null) {
                 this.placeholderParser.chat(registration.getProvider());

@@ -8,7 +8,7 @@ import org.jetbrains.annotations.NotNull;
  */
 @FunctionalInterface
 public interface PacketHandler {
-    
+
     /**
      * Handles a packet send event.
      *

@@ -86,12 +86,12 @@ public final class PlayerTagManager {
         protocolManager.sendPacketSilently(channel, metadataPacket);
 
         // run task sync to be sure, that we don't cause any issue with passengers
-        Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
+        target.getScheduler().runDelayed(this.plugin, (task) -> {
             if (target.isOnline() && target.isValid() && viewer.isOnline() && viewer.isValid()) {
                 final var setPassengerPacket = PacketFactory.createSetPassengersPacket(target, targetData.tagEntityId);
                 protocolManager.sendPacketSilently(channel, setPassengerPacket);
             }
-        }, PASSENGER_DELAY_TICKS);
+        }, null, PASSENGER_DELAY_TICKS);
 
         final PlayerData viewerData = this.getPlayerData(viewer);
         viewerData.visibleTags.add(target);
