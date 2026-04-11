@@ -1,5 +1,6 @@
 package com.github.groundbreakingmc.moderntags.text;
 
+import com.github.groundbreakingmc.moderntags.utils.NumberUtils;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
 import me.clip.placeholderapi.PlaceholderAPIPlugin;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
@@ -88,8 +89,8 @@ public final class PlaceholderParser {
                     final double health = player.getHealth();
                     return Tag.selfClosingInserting(Component.text(
                             // 19.3 -> 19.0
-                            // 20.0 -> 20.0
-                            Math.round(health * 2.0) / 2.0
+                            // 20.0 -> 20
+                            NumberUtils.doubleToStr(health)
                     ));
                 }
                 default -> {
