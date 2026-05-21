@@ -1,80 +1,80 @@
 package com.github.groundbreakingmc.moderntags.listener;
 
 import com.github.groundbreakingmc.moderntags.ModernTags;
-import com.github.groundbreakingmc.moderntags.listener.handler.*;
-import com.github.groundbreakingmc.moderntags.manager.PlayerTagManager;
-import com.github.groundbreakingmc.moderntags.text.PlaceholderParser;
+import com.github.groundbreakingmc.moderntags.core.RenderLoop;
+import com.github.groundbreakingmc.moderntags.listener.handler.clientbound.*;
+import com.github.groundbreakingmc.moderntags.listener.handler.serverbound.ActionHandler;
+import com.github.groundbreakingmc.moderntags.listener.handler.serverbound.InputHandler;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.EnumMap;
-import java.util.Map;
-
 /**
- * Main packet listener that delegates packet handling to specific handlers.
- * <p>
- * This class uses the Strategy pattern to separate concerns and make the code
- * more maintainable and testable. Each packet type has its own dedicated handler.
+ * Routes incoming and outgoing play packets to their dedicated handlers.
  */
 public final class PacketListener extends PacketListenerAbstract {
 
-    private final Map<PacketType.Play.Server, PacketHandler> handlers;
+    private final InputHandler inputHandler;
+    private final ActionHandler actionHandler;
 
-    public PacketListener(@NotNull ModernTags plugin,
-                          @NotNull PlayerTagManager tagManager,
-                          @NotNull PlaceholderParser placeholderParser) {
-        this.handlers = this.initializeHandlers(plugin, tagManager, placeholderParser);
+    private final SpawnEntityHandler spawnEntity;
+    private final DestroyEntitiesHandler destroyEntities;
+    private final DeathHandler death;
+    private final DisconnectHandler disconnect;
+    private final PlayerInfoUpdateHandler playerInfoUpdate;
+    private final PlayerInfoRemoveHandler playerInfoRemove;
+    private final SetPassengersHandler setPassengers;
+    private final SelfInvisibilityHandler selfInvisibility;
+    private final EntityMetadataHandler entityMetadata;
+    private final UpdateTeamHandler updateTeam;
+    private final PlayerPositionHandler playerPosition;
+
+    public PacketListener(@NotNull ModernTags plugin, @NotNull RenderLoop renderLoop) {
+        this.inputHandler = new InputHandler(renderLoop);
+        this.actionHandler = new ActionHandler(renderLoop);
+        this.spawnEntity = new SpawnEntityHandler(plugin, renderLoop);
+        this.destroyEntities = new DestroyEntitiesHandler(renderLoop);
+        this.death = new DeathHandler(renderLoop);
+        this.disconnect = new DisconnectHandler(renderLoop);
+        this.playerInfoUpdate = new PlayerInfoUpdateHandler(renderLoop);
+        this.playerInfoRemove = new PlayerInfoRemoveHandler(renderLoop);
+        this.setPassengers = new SetPassengersHandler(renderLoop);
+        this.selfInvisibility = new SelfInvisibilityHandler(renderLoop);
+        this.entityMetadata = new EntityMetadataHandler(renderLoop);
+        this.updateTeam = new UpdateTeamHandler(renderLoop);
+        this.playerPosition = new PlayerPositionHandler(renderLoop);
+    }
+
+    @Override
+    public void onPacketReceive(PacketReceiveEvent event) {
+        if (event.getPlayer() == null) return;
+        if (!(event.getPacketType() instanceof PacketType.Play.Client type)) return;
+
+        switch (type) {
+            case PLAYER_INPUT -> this.inputHandler.handle(event);
+            case ENTITY_ACTION -> this.actionHandler.handle(event);
+        }
     }
 
     @Override
     public void onPacketSend(PacketSendEvent event) {
-        if (event.getPlayer() == null) {
-            return;
+        if (event.getPlayer() == null) return;
+        if (!(event.getPacketType() instanceof PacketType.Play.Server type)) return;
+
+        switch (type) {
+            case SPAWN_ENTITY -> this.spawnEntity.handle(event);
+            case DESTROY_ENTITIES -> this.destroyEntities.handle(event);
+            case ENTITY_STATUS -> this.death.handle(event);
+            case DISCONNECT -> this.disconnect.handle(event);
+            case PLAYER_INFO_UPDATE -> this.playerInfoUpdate.handle(event);
+            case PLAYER_INFO_REMOVE -> this.playerInfoRemove.handle(event);
+            case SET_PASSENGERS -> this.setPassengers.handle(event);
+            case ENTITY_EFFECT, REMOVE_ENTITY_EFFECT -> this.selfInvisibility.handle(event);
+            case ENTITY_METADATA -> this.entityMetadata.handle(event);
+            case TEAMS -> this.updateTeam.handle(event);
+            case PLAYER_POSITION_AND_LOOK -> this.playerPosition.handle(event);
         }
-
-        if (!(event.getPacketType() instanceof PacketType.Play.Server type)) {
-            return;
-        }
-
-        final PacketHandler handler = this.handlers.get(type);
-        if (handler != null) {
-            handler.handle(event);
-        }
-    }
-
-    private Map<PacketType.Play.Server, PacketHandler> initializeHandlers(
-            @NotNull ModernTags plugin,
-            @NotNull PlayerTagManager tagManager,
-            @NotNull PlaceholderParser placeholderParser) {
-
-        final Map<PacketType.Play.Server, PacketHandler> handlers = new EnumMap<>(PacketType.Play.Server.class);
-
-        handlers.put(PacketType.Play.Server.SPAWN_ENTITY,
-                new SpawnEntityHandler(plugin, tagManager));
-
-        handlers.put(PacketType.Play.Server.PLAYER_INFO_UPDATE,
-                new PlayerInfoUpdateHandler(tagManager));
-
-        handlers.put(PacketType.Play.Server.PLAYER_INFO_REMOVE,
-                new PlayerInfoRemoveHandler(tagManager));
-
-        handlers.put(PacketType.Play.Server.DESTROY_ENTITIES,
-                new DestroyEntitiesHandler(tagManager));
-
-        handlers.put(PacketType.Play.Server.PLAYER_POSITION_AND_LOOK,
-                new PlayerPositionHandler(tagManager));
-
-        handlers.put(PacketType.Play.Server.SET_PASSENGERS,
-                new SetPassengersHandler(tagManager));
-
-        handlers.put(PacketType.Play.Server.ENTITY_STATUS,
-                new DeathHandler(tagManager));
-
-        handlers.put(PacketType.Play.Server.DISCONNECT,
-                new DisconnectHandler(tagManager, placeholderParser));
-
-        return handlers;
     }
 }

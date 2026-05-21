@@ -1,8 +1,8 @@
-package com.github.groundbreakingmc.moderntags.utils;
+package com.github.groundbreakingmc.moderntags.util;
 
 public class NumberUtils {
 
-    public static String doubleToStr(double v) {
+    public static String healthToStr(double v) {
         final int normalized = (int) Math.ceil(v);
         return switch (normalized) {
             case 0 -> "0";
@@ -28,5 +28,9 @@ public class NumberUtils {
             case 20 -> "20";
             default -> Integer.toString(normalized);
         };
+    }
+
+    public static int healthToInt(double v) {
+        return (int) Math.ceil(v);
     }
 }

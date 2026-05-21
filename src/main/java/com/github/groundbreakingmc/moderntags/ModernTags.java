@@ -2,105 +2,136 @@ package com.github.groundbreakingmc.moderntags;
 
 import com.github.groundbreakingmc.moderntags.command.ReloadCommand;
 import com.github.groundbreakingmc.moderntags.config.ConfigValues;
+import com.github.groundbreakingmc.moderntags.core.RenderLoop;
+import com.github.groundbreakingmc.moderntags.core.RenderTask;
 import com.github.groundbreakingmc.moderntags.listener.PacketListener;
-import com.github.groundbreakingmc.moderntags.manager.PlayerTagManager;
-import com.github.groundbreakingmc.moderntags.manager.UpdateScheduler;
-import com.github.groundbreakingmc.moderntags.text.PlaceholderParser;
+import com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer;
+import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
+import com.github.groundbreakingmc.moderntags.text.TagTextResolver;
+import com.github.groundbreakingmc.moderntags.update.UpdateManager;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerCommon;
-import io.papermc.paper.threadedregions.scheduler.AsyncScheduler;
 import net.milkbowl.vault.chat.Chat;
-import org.bukkit.plugin.PluginManager;
+import org.bukkit.Bukkit;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitScheduler;
 
-import java.nio.file.Path;
+import java.io.File;
+import java.util.concurrent.CompletableFuture;
 
 public final class ModernTags extends JavaPlugin {
 
-    private PlayerTagManager tagManager;
-    private UpdateScheduler updateScheduler;
-    private PlaceholderParser placeholderParser;
-    private PacketListenerCommon listener;
+    private TagTextResolver tagTextResolver;
+    private ConfigValues configValues;
+    private RenderLoop renderLoop;
+    private UpdateManager updateManager;
+    private PacketListenerCommon packetListener;
 
     @Override
     public void onEnable() {
         this.saveDefaultConfig();
 
-        this.placeholderParser = this.initializePlaceholderParser();
-        this.tagManager = new PlayerTagManager(this, this.placeholderParser);
+        this.tagTextResolver = this.createTagTextResolver();
+        this.renderLoop = new RenderLoop();
+
+        this.configValues = new ConfigValues(this.getDataFolder(), this.tagTextResolver);
+        this.configValues.registerModernFactory(cfg -> ModernRenderer.of(this, cfg));
+        this.configValues.registerLegacyFactory(cfg -> LegacyRenderer.of(
+                this.tagTextResolver,
+                this.configValues.belowNameValueParser(),
+                this.configValues.belowNameChar(),
+                cfg
+        ));
 
         this.loadConfiguration();
 
-        this.updateScheduler = new UpdateScheduler(this, this.tagManager);
-        this.updateScheduler.start();
+        this.updateManager = new UpdateManager(this, this.renderLoop);
+        this.updateManager.start(this.configValues.tickRate());
 
-        this.listener = PacketEvents.getAPI().getEventManager().registerListener(
-                new PacketListener(this, this.tagManager, this.placeholderParser)
+        this.packetListener = PacketEvents.getAPI().getEventManager().registerListener(
+                new PacketListener(this, this.renderLoop)
         );
 
         this.getCommand("moderntags").setExecutor(new ReloadCommand(this));
 
-        final AsyncScheduler scheduler = super.getServer().getAsyncScheduler();
+        // Initialize all (target, viewer) pairs — RenderLoop drain handles threading.
+        Bukkit.getAsyncScheduler().runNow(this, task ->
+                this.renderLoop.post(new RenderTask.InitializeAll()));
 
-        scheduler.runNow(this, task -> this.tagManager.initializeAll());
-
-        scheduler.runNow(this, (task) -> {
-            final RegisteredServiceProvider<Chat> registration = super.getServer().getServicesManager().getRegistration(Chat.class);
-            if (registration != null) {
-                this.placeholderParser.chat(registration.getProvider());
-            }
+        // Resolve Vault async — services may not be registered yet at this point.
+        Bukkit.getAsyncScheduler().runNow(this, task -> {
+            final RegisteredServiceProvider<Chat> reg =
+                    getServer().getServicesManager().getRegistration(Chat.class);
+            if (reg != null) this.tagTextResolver.chat(reg.getProvider());
         });
     }
 
     @Override
     public void onDisable() {
-        if (this.updateScheduler != null) {
-            this.updateScheduler.stop();
+        if (this.updateManager != null) this.updateManager.stop();
+
+        if (this.renderLoop != null) {
+            this.renderLoop.post(new RenderTask.InvalidateAll());
         }
 
-        if (this.tagManager != null) {
-            super.getServer().getOnlinePlayers().forEach(this.tagManager::cleanup);
-        }
-
-        if (this.listener != null) {
-            PacketEvents.getAPI().getEventManager().unregisterListener(this.listener);
+        if (this.packetListener != null) {
+            PacketEvents.getAPI().getEventManager().unregisterListener(this.packetListener);
         }
     }
 
-    public void reload() {
-        super.getServer().getOnlinePlayers().forEach(this.tagManager::cleanup);
-
-        if (this.updateScheduler != null) {
-            this.updateScheduler.stop();
+    @Override
+    public void saveDefaultConfig() {
+        final File configFile = new File(getDataFolder(), "config.yml");
+        if (!configFile.exists()) {
+            saveResource("config.yml", false);
+            saveResource("tags/default.yml", false);
+            saveResource("tags/default-legacy.yml", false);
+            saveResource("tags/vip.yml", false);
         }
+    }
 
-        this.loadConfiguration();
+    /**
+     * Tears down all rendering state, reloads configuration, and re-initializes.
+     */
+    public CompletableFuture<Void> reload() {
+        return CompletableFuture.runAsync(() -> {
+            this.renderLoop.post(new RenderTask.InvalidateAll());
+            this.updateManager.stop();
 
-        this.updateScheduler = new UpdateScheduler(this, this.tagManager);
-        this.updateScheduler.start();
+            this.loadConfiguration();
 
-        super.getServer().getOnlinePlayers().forEach(this.tagManager::updateTag);
+            Bukkit.getAsyncScheduler().runNow(this, $$ -> {
+                this.renderLoop.post(new RenderTask.InitializeAll());
+                this.updateManager.start(this.configValues.tickRate());
+            });
+        });
+    }
+
+    public TagTextResolver tagTextResolver() {
+        return this.tagTextResolver;
+    }
+
+    public ConfigValues configValues() {
+        return this.configValues;
+    }
+
+    public RenderLoop renderLoop() {
+        return this.renderLoop;
     }
 
     private void loadConfiguration() {
-        try {
-            final Path configPath = this.getDataFolder().toPath().resolve("config.yml");
-            final ConfigValues values = new ConfigValues(super.getLogger(), configPath);
-            values.setup();
-            this.placeholderParser.useMinimessageColorizer(values.useMinimessageColorizer());
-            this.tagManager.setTags(values.tags());
-            this.tagManager.hideTagWhenHasPassenger(values.hideTagWhenHasPassenger());
-        } catch (Exception ex) {
-            throw new RuntimeException("Error loading configuration", ex);
-        }
+        this.configValues.setup();
+        this.tagTextResolver.miniMessageVault(this.configValues.useMinimessageColorizer());
+        this.renderLoop.groups(this.configValues.tags());
+        this.renderLoop.hideTagWhenHasPassenger(this.configValues.hideTagWhenHasPassenger());
     }
 
-    private PlaceholderParser initializePlaceholderParser() {
-        final PluginManager pluginManager = super.getServer().getPluginManager();
-        final boolean supportsPapi = pluginManager.getPlugin("PlaceholderAPI") != null;
-        final boolean supportsVault = pluginManager.getPlugin("Vault") != null;
-        return new PlaceholderParser(supportsVault, supportsPapi);
+    private TagTextResolver createTagTextResolver() {
+        final var pm = getServer().getPluginManager();
+        return new TagTextResolver(
+                getLogger(),
+                pm.getPlugin("Vault") != null,
+                pm.getPlugin("PlaceholderAPI") != null
+        );
     }
 }

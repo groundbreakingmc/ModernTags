@@ -1,0 +1,23 @@
+# Frame transition rate (in ticks), -1 to disable
+frame-update-rate: -1
+# Placeholder update rate (in ticks), -1 to disable
+placeholders-update-rate: 10
+
+# LegacyRenderer uses scoreboard TEAMS packets for the nametag (visibility=ALWAYS)
+# and a below-name objective for health/custom values.
+#
+# It does not have a tab-settings section — prefix and suffix shown here ARE
+# the TAB list entries, because that is how vanilla Minecraft scoreboard teams work.
+# (The same is true for the TAB plugin: there is no separate tag vs. tab split.)
+#
+# Keeps the player's existing name color set by other plugins (e.g. glow plugins).
+preserve-player-name-color: true
+
+# Colors sent by the server that are treated as "no color set".
+# The frame's name-color will be used instead.
+ignored-colors: [ "white" ]
+
+frames:
+  - prefix: "{owner:prefix}"
+    name-color: "white"
+    suffix: "{owner:suffix}"

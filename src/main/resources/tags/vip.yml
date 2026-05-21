@@ -1,0 +1,32 @@
+modern:
+  frame-update-rate: 10
+  placeholders-update-rate: 10
+
+  frames:
+    # Frame 0 — gold stars
+    - text: |-
+        &6★ {owner:prefix}&r&e{owner:name}{owner:suffix} &r&6★
+        &c❤&f{owner:health}
+
+    # Frame 1 — yellow stars
+    - text: |-
+        &e✦ {owner:prefix}&r&e{owner:name}{owner:suffix} &r&e✦
+        &c❤&f{owner:health}
+
+legacy:
+  frame-update-rate: 10
+  placeholders-update-rate: 10
+
+  # LegacyRenderer reads these at the top level (no tab-settings wrapper —
+  # legacy uses scoreboard TEAMS directly and has no override/tab-mode concept).
+  preserve-player-name-color: true
+  ignored-colors: [ "white" ]
+
+  frames:
+    - prefix: "&e✦ {owner:prefix}"
+      name-color: "yellow"
+      suffix: "{owner:suffix} &e✦"
+
+    - prefix: "&6★ {owner:prefix}"
+      name-color: "yellow"
+      suffix: "{owner:suffix} &6★"

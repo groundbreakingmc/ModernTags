@@ -18,14 +18,15 @@ public final class ReloadCommand implements TabExecutor {
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
-        try {
-            this.plugin.reload();
-            sender.sendMessage("§aPlayerTag configuration reloaded successfully!");
-        } catch (Throwable th) {
-            sender.sendMessage("§cFailed to reload configuration: " + th.getMessage());
-            this.plugin.getLogger().severe("Error reloading configuration: " + th.getMessage());
-            th.printStackTrace();
-        }
+        this.plugin.reload().whenComplete((res, ex) -> {
+            if (ex != null) {
+                sender.sendMessage("§cFailed to reload configuration: " + ex.getMessage());
+                this.plugin.getLogger().severe("Error reloading configuration: " + ex.getMessage());
+                ex.printStackTrace();
+            } else {
+                sender.sendMessage("§aPlayerTag configuration reloaded successfully!");
+            }
+        });
         return true;
     }
 

@@ -1,33 +1,73 @@
 plugins {
-    id("java")
+    java
+    alias(libs.plugins.shadow)
 }
 
 group = "com.github.groundbreakingmc"
-version = "1.0.2"
+version = "2.0.0"
 
 repositories {
-    mavenCentral() // Configurate
+    mavenCentral() // JCTools
     maven("https://repo.papermc.io/repository/maven-public/") // Paper
     maven("https://repo.codemc.io/repository/maven-releases/") // PacketEvents
     maven("https://repo.helpch.at/releases") // PlaceholderAPI
-    maven("https://jitpack.io") // VaultAPI
+    maven("https://jitpack.io") // MyLib, GikyMessage, VaultAPI
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
-    compileOnly("com.github.retrooper:packetevents-spigot:2.11.2")
-    compileOnly("me.clip:placeholderapi:2.11.7")
-    compileOnly("com.github.MilkBowl:VaultAPI:1.7") {
+    compileOnly(libs.paper.api)
+
+    // Source: https://github.com/retrooper/packetevents
+    compileOnly(libs.packetevents.spigot)
+
+    // Source: https://github.com/groundbreakingmc/MyLib
+    implementation(libs.mylib)
+
+    // Source: https://github.com/groundbreakingmc/GikyMessage
+    implementation(libs.gikymessage)
+
+    // Source: https://github.com/PlaceholderAPI/PlaceholderAPI
+    compileOnly(libs.placeholderapi)
+
+    // Source: https://github.com/MilkBowl/VaultAPI
+    compileOnly(libs.vaultapi) {
         isTransitive = false
     }
-    compileOnly("org.spongepowered:configurate-yaml:4.2.0")
+
+    // Source: https://github.com/JCTools/JCTools
+    implementation(libs.jstools)
 }
 
 java.toolchain {
     languageVersion = JavaLanguageVersion.of(21)
 }
 
-tasks.withType<JavaCompile> {
-    options.release = 21
-    options.encoding = "UTF-8"
+tasks {
+    withType<JavaCompile> {
+        options.release = 21
+        options.encoding = "UTF-8"
+    }
+
+    shadowJar {
+        relocate(
+            "com.github.groundbreakingmc.mylib",
+            "com.github.groundbreakingmc.moderntags.libs.mylib"
+        )
+
+        relocate(
+            "com.github.groundbreakingmc.gikymessage",
+            "com.github.groundbreakingmc.moderntags.libs.gikymessage"
+        )
+
+        relocate(
+            "org.jctools",
+            "com.github.groundbreakingmc.moderntags.libs.jctools"
+        )
+
+        minimize()
+    }
+
+    build {
+        dependsOn(shadowJar)
+    }
 }

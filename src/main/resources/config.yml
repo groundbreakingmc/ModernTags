@@ -1,78 +1,40 @@
-# Use MiniMessage for formatting prefixes and suffixes from Vault
-use-minimessage-colorizer-for-prefixes-and-suffixes: false
+# Whether to parse <placeholder:prefix> and <placeholder:suffix> Vault placeholders using MiniMessage.
+# If false, they will be treated as legacy (&-formatted) strings.
+vault-mm-formatting: false
 
-# Hide tag when player has passengers (e.g., another player)
-hide-tag-when-has-passenger: false
+# Hide the tag when the player has passengers (e.g., another player riding them).
+hide-tag-when-has-passenger: true
 
-name-tags:
-  # Default tag (required)
-  default:
-    # Frame transition rate (in ticks), -1 to disable
-    frame-update-rate: 10
-    # Placeholder update rate (in ticks)
-    placeholders-update-rate: 10 # in ticks
+# How often (in milliseconds) should ModernTags tick.
+tick-rate: 50
 
-    # Tag priority (higher value = higher priority)
-    priority: 0
+legacy-general:
+  below-name-value: "owner:health" # do not use {} here
+  below-name-text: "&c❤"
 
-    frames:
-      # First frame
-      0:
-        # Text content (use <newline> for line breaks)
-        text: |-
-          <placeholder:prefix><white><placeholder:name><placeholder:suffix>
-          <red>❤ <white><placeholder:health>
+# ──────────────────────────────────────────────────────────────────────────────
+# Tag groups
+# ──────────────────────────────────────────────────────────────────────────────
+# Groups are sorted by priority (highest wins).
+# owner-conditions  — evaluated once per tag owner
+# viewer-conditions — evaluated per viewer
+#
+# Client version selection (TextDisplay vs Scoreboard Teams) is automatic:
+# each tag file contains both "modern" and "legacy" frame sections.
+# No need to specify protocol_version conditions manually.
+# ──────────────────────────────────────────────────────────────────────────────
+tags:
+  # ── Default group ───────────────────────────────────────────────────────────
+  - priority: 0
+    entries:
+      - priority: 0
+        modern: tags/default.yml:<root>
+        legacy: tags/default-legacy.yml:<root>
 
-        # NOTE: All parameters below show their default values that will be applied automatically
-        # even if not specified in the frame configuration. This means you can specify only "text"
-        # and everything else will work with these default settings.
-
-        # Position offsets (float values)
-        x-offset: 0.0
-        y-offset: 0.2
-        z-offset: 0.0
-
-        # Scale (float, default 1.0)
-        scale: 1.0
-
-        # Billboard behavior (boolean)
-        vertical-billboard: false
-
-        # Brightness in "type-strength" format
-        # Type: "block" or "sky"
-        # Strength: 0-15
-        brightness: "block-15"
-        # brightness: "sky-10"
-
-        # View range in blocks (float)
-        view-range: 1.0
-
-        # Shadow parameters (float values)
-        shadow-radius: 0.0
-        shadow-strength: 1.0
-
-        # Line width (integer)
-        line-width: 200
-
-        # Background color (hex string or integer)
-        # Format: #RRGGBB (6 digits) or #AARRGGBB (8 digits with alpha)
-        background-color: "#00000000"  # Transparent
-        # background-color: "#40000000"  # Semi-transparent black
-        # background-color: "#FF000000"  # Solid black
-        # background-color: 0  # Integer format
-
-        # Text opacity (0-255)
-        text-opacity: 255
-
-        # Shadow rendering (boolean)
-        shadowed: true
-
-        # See-through mode (boolean)
-        see-through: false
-
-        # Use default background (boolean)
-        default-background: false
-
-        # Text alignment: LEFT, CENTER, or RIGHT
-        alignment: "CENTER"
-
+  # ── VIP group ───────────────────────────────────────────────────────────────
+  - priority: 1
+    owner-conditions: "hasPermission('moderntags.tag.vip')"
+    entries:
+      - priority: 0
+        modern: tags/vip.yml:modern
+        legacy: tags/vip.yml:legacy

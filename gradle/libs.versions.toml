@@ -1,0 +1,22 @@
+[versions]
+shadow = "9.4.1"
+jmh = "0.7.3"
+paper = "1.21.8-R0.1-SNAPSHOT"
+packetevents = "2.11.2"
+mylib = "8ae23570d6"
+gikymessage = "cbe1830528"
+placeholderapi = "2.11.7"
+vaultapi = "1.7"
+jstools = "4.0.3"
+
+[libraries]
+paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
+packetevents-spigot = { module = "com.github.retrooper:packetevents-spigot", version.ref = "packetevents" }
+mylib = { module = "com.github.groundbreakingmc:MyLib", version.ref = "mylib" }
+gikymessage = { module = "com.github.groundbreakingmc:GikyMessage", version.ref = "gikymessage" }
+placeholderapi = { module = "me.clip:placeholderapi", version.ref = "placeholderapi" }
+vaultapi = { module = "com.github.MilkBowl:VaultAPI", version.ref = "vaultapi" }
+jstools = { module = "org.jctools:jctools-core", version.ref = "jstools" }
+
+[plugins]
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
