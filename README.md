@@ -40,9 +40,7 @@ fallback to Scoreboard Teams for older clients.
 
 | Permission | Description |
 |---|---|
-| `moderntags.tag.<name>` | Use a specific tag group (auto-generated per group) |
 | `moderntags.see.own` | See your own tag |
-| `moderntags.see.other` | See other players' tags |
 | `moderntags.reload` | Access to the reload command |
 
 ## Placeholders
