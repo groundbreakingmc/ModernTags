@@ -24,7 +24,3 @@ permissions:
   moderntags.see.own:
     description: "Allows to see own tag"
     default: false
-
-  moderntags.see.other:
-    description: "Allows to see other player tags"
-    default: true

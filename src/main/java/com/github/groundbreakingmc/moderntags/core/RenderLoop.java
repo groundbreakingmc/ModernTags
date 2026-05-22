@@ -111,8 +111,8 @@ public final class RenderLoop {
      * Safe because drain is single-threaded and these lists are consumed before the
      * method returns (they are never stored or passed to code that retains them).
      */
-    private final ArrayList<String> reuseModernNames    = new ArrayList<>();
-    private final ArrayList<Player> reuseLegacyTargets  = new ArrayList<>();
+    private final ArrayList<String> reuseModernNames = new ArrayList<>();
+    private final ArrayList<Player> reuseLegacyTargets = new ArrayList<>();
     private final ArrayList<String> reuseUnmanagedNames = new ArrayList<>();
 
     /**

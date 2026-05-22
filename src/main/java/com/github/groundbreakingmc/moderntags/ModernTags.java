@@ -5,6 +5,7 @@ import com.github.groundbreakingmc.moderntags.config.ConfigValues;
 import com.github.groundbreakingmc.moderntags.core.RenderLoop;
 import com.github.groundbreakingmc.moderntags.core.RenderTask;
 import com.github.groundbreakingmc.moderntags.listener.BukkitListener;
+import com.github.groundbreakingmc.moderntags.listener.LuckPermsListener;
 import com.github.groundbreakingmc.moderntags.listener.PacketListener;
 import com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer;
 import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
@@ -27,6 +28,7 @@ public final class ModernTags extends JavaPlugin {
     private RenderLoop renderLoop;
     private UpdateManager updateManager;
     private PacketListenerCommon packetListener;
+    private LuckPermsListener luckPermsListener;
 
     @Override
     public void onEnable() {
@@ -52,6 +54,13 @@ public final class ModernTags extends JavaPlugin {
         this.packetListener = PacketEvents.getAPI().getEventManager().registerListener(
                 new PacketListener(this, this.renderLoop)
         );
+
+        final var lp = getServer().getServicesManager()
+                .getRegistration(net.luckperms.api.LuckPerms.class);
+        if (lp != null) {
+            this.luckPermsListener = new LuckPermsListener(this, this.renderLoop, lp.getProvider());
+            this.luckPermsListener.register();
+        }
 
         super.getServer().getPluginManager().registerEvents(new BukkitListener(this.renderLoop), this);
 
@@ -79,6 +88,10 @@ public final class ModernTags extends JavaPlugin {
 
         if (this.packetListener != null) {
             PacketEvents.getAPI().getEventManager().unregisterListener(this.packetListener);
+        }
+
+        if (this.luckPermsListener != null) {
+            this.luckPermsListener.unregister();
         }
     }
 

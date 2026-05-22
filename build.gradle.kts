@@ -34,6 +34,9 @@ dependencies {
         isTransitive = false
     }
 
+    // Source: https://luckperms.net/wiki/Developer-API
+    compileOnly(libs.luckperms.api)
+
     // Source: https://github.com/JCTools/JCTools
     implementation(libs.jstools)
 }

@@ -7,6 +7,7 @@ mylib = "8ae23570d6"
 gikymessage = "cbe1830528"
 placeholderapi = "2.11.7"
 vaultapi = "1.7"
+luckperms-api = "5.4"
 jstools = "4.0.3"
 
 [libraries]
@@ -16,6 +17,7 @@ mylib = { module = "com.github.groundbreakingmc:MyLib", version.ref = "mylib" }
 gikymessage = { module = "com.github.groundbreakingmc:GikyMessage", version.ref = "gikymessage" }
 placeholderapi = { module = "me.clip:placeholderapi", version.ref = "placeholderapi" }
 vaultapi = { module = "com.github.MilkBowl:VaultAPI", version.ref = "vaultapi" }
+luckperms-api = { module = "net.luckperms:api", version.ref = "luckperms-api" }
 jstools = { module = "org.jctools:jctools-core", version.ref = "jstools" }
 
 [plugins]
