@@ -129,8 +129,6 @@ public final class LegacyRenderer implements TagRenderer {
      */
     @Override
     public void render(@NotNull ViewerState state) {
-        if (state.target == state.viewer) return;
-
         final TargetData data = this.getOrCreate(state.target);
         final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
         if (channel == null) return;
@@ -157,8 +155,6 @@ public final class LegacyRenderer implements TagRenderer {
      */
     @Override
     public void stopRendering(@NotNull ViewerState state) {
-        if (state.target == state.viewer) return;
-
         final TargetData data = this.targetData.get(state.target);
         if (data == null) return;
 
