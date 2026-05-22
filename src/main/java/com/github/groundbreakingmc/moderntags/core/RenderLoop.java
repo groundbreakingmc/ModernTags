@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       uses {@code TeamMode.CREATE} (tracked in {@link #modernTeamsForwarded}); subsequent sends
  *       use the original mode so the client always has a valid team before any UPDATE arrives.</li>
  *   <li><b>LegacyRenderer</b> — packet suppressed (LegacyRenderer owns the player's team);
- *       color info stored in {@link ViewerState#teamSnapshot} for {@code preserve-player-name-color}.</li>
+ *       color stored in {@link ViewerState#teamColor} for {@code preserve-player-name-color}.</li>
  *   <li><b>Unmanaged / info-only</b> — forwarded unchanged, preserving sidebar and tab-list teams
  *       sent by plugins such as TAB (including empty-player-list packets).</li>
  * </ol>
@@ -67,10 +67,17 @@ public final class RenderLoop {
     private final Long2ObjectOpenHashMap<ViewerState> states = new Long2ObjectOpenHashMap<>(256);
 
     /**
-     * viewer.entityId → list of keys where that viewer appears.
+     * viewer.entityId → list of keys where that viewer appears as the <em>viewer</em> half.
      * Enables O(viewers) cleanup instead of a full-map scan.
      */
     private final Int2ObjectOpenHashMap<LongArrayList> viewerIndex = new Int2ObjectOpenHashMap<>(64);
+
+    /**
+     * target.entityId → list of keys where that player appears as the <em>target</em> half.
+     * Symmetric counterpart to {@link #viewerIndex}; eliminates the O(n) state-map scan
+     * that was previously required when a target player disconnects.
+     */
+    private final Int2ObjectOpenHashMap<LongArrayList> targetIndex = new Int2ObjectOpenHashMap<>(64);
 
     /**
      * viewer.entityId → teamName → set of playerNames currently in that team.
@@ -104,9 +111,16 @@ public final class RenderLoop {
      * Safe because drain is single-threaded and these lists are consumed before the
      * method returns (they are never stored or passed to code that retains them).
      */
-    private final ArrayList<String> reuseModernNames = new ArrayList<>();
-    private final ArrayList<Player> reuseLegacyTargets = new ArrayList<>();
+    private final ArrayList<String> reuseModernNames    = new ArrayList<>();
+    private final ArrayList<Player> reuseLegacyTargets  = new ArrayList<>();
     private final ArrayList<String> reuseUnmanagedNames = new ArrayList<>();
+
+    /**
+     * Reused across every {@link #handleTick} call to deduplicate renderer visits.
+     * Allocated once; cleared at the start of each tick instead of re-created.
+     */
+    private final Set<TagRenderer> tickSeen =
+            Collections.newSetFromMap(new IdentityHashMap<>(32));
 
     private final ProtocolManager protocolManager = PacketEvents.getAPI().getProtocolManager();
 
@@ -179,7 +193,7 @@ public final class RenderLoop {
         }
 
         if (target == viewer && !viewer.hasPermission("moderntags.see.own")) {
-            return; // TODO: commit
+            return;
         }
 
         final TagRenderer renderer = this.resolveRenderer(target, viewer);
@@ -203,15 +217,24 @@ public final class RenderLoop {
     }
 
     private void handleSuppress(@NotNull RenderTask.SuppressChange s) {
-        final ViewerState state = this.states.get(key(s.target(), s.viewer()));
+        this.applySuppressChange(s.target(), s.viewer(), s.reason(), s.add());
+    }
+
+    /**
+     * Core suppress logic, extracted so it can be called directly from
+     * {@link #handlePassengers} without posting a task back to the queue.
+     */
+    private void applySuppressChange(
+            @NotNull Player target, @NotNull Player viewer, byte reason, boolean add) {
+        final ViewerState state = this.states.get(key(target, viewer));
         if (state == null) return;
 
-        if (s.add()) {
-            if (state.hasSuppress(s.reason())) return;
-            state.addSuppress(s.reason());
+        if (add) {
+            if (state.hasSuppress(reason)) return;
+            state.addSuppress(reason);
         } else {
-            if (!state.hasSuppress(s.reason())) return;
-            state.removeSuppress(s.reason());
+            if (!state.hasSuppress(reason)) return;
+            state.removeSuppress(reason);
         }
 
         this.applyCurrentState(state);
@@ -517,9 +540,11 @@ public final class RenderLoop {
         if (channel == null) return;
 
         if (this.hideTagWhenHasPassenger) {
+            // Call directly instead of posting back to the queue — we are already inside
+            // drain, so re-posting would add unnecessary queue overhead and one extra object
+            // allocation (RenderTask.SuppressChange record).
             final boolean hasReal = p.incomingPassengers().length > 0;
-            this.post(new RenderTask.SuppressChange(
-                    p.target(), p.viewer(), ViewerState.SUPPRESS_PASSENGER, hasReal));
+            this.applySuppressChange(p.target(), p.viewer(), ViewerState.SUPPRESS_PASSENGER, hasReal);
             this.sendPassengers(channel, p.target().getEntityId(), p.incomingPassengers());
             return;
         }
@@ -543,10 +568,10 @@ public final class RenderLoop {
     }
 
     private void handleCleanup(@NotNull Player player) {
-        final int viewerId = player.getEntityId();
+        final int playerId = player.getEntityId();
 
-        // Remove all states where the player is a viewer (fast path via reverse index).
-        final LongArrayList viewerKeys = this.viewerIndex.remove(viewerId);
+        // ── Viewer side: remove all (target → player) states via viewer index ─
+        final LongArrayList viewerKeys = this.viewerIndex.remove(playerId);
         if (viewerKeys != null) {
             for (int i = 0; i < viewerKeys.size(); i++) {
                 final long k = viewerKeys.getLong(i);
@@ -554,27 +579,29 @@ public final class RenderLoop {
                 if (st != null && st.rendered && st.renderer != null) {
                     st.renderer.stopRendering(st);
                 }
+                // Keep the target index consistent.
+                final int tid = (int) (k >>> 32);
+                final LongArrayList tkeys = this.targetIndex.get(tid);
+                if (tkeys != null) tkeys.rem(k);
             }
         }
 
-        // Remove all states where the player is a target.
-        final long targetPrefix = (long) player.getEntityId() << 32;
-        final var iter = this.states.long2ObjectEntrySet().fastIterator();
-        final LongArrayList toRemove = new LongArrayList(8);
-        while (iter.hasNext()) {
-            final var entry = iter.next();
-            if ((entry.getLongKey() & 0xFFFF_FFFF_0000_0000L) == targetPrefix) {
-                final ViewerState st = entry.getValue();
-                if (st.rendered && st.renderer != null) {
+        // ── Target side: remove all (player → viewer) states via target index ─
+        // Previously required an O(n) full-map scan; now O(viewers) via targetIndex.
+        final LongArrayList targetKeys = this.targetIndex.remove(playerId);
+        if (targetKeys != null) {
+            for (int i = 0; i < targetKeys.size(); i++) {
+                final long k = targetKeys.getLong(i);
+                final ViewerState st = this.states.remove(k);
+                if (st != null && st.rendered && st.renderer != null) {
                     st.renderer.stopRendering(st);
                 }
-                toRemove.add(entry.getLongKey());
-                final int vid = (int) entry.getLongKey();
+                // Keep the viewer index consistent.
+                final int vid = (int) k;
                 final LongArrayList vkeys = this.viewerIndex.get(vid);
-                if (vkeys != null) vkeys.rem(entry.getLongKey());
+                if (vkeys != null) vkeys.rem(k);
             }
         }
-        toRemove.forEach(this.states::remove);
 
         // Delegate renderer-level cleanup (frame state, objective cache, etc.).
         for (final TagGroup group : this.groups) {
@@ -585,8 +612,8 @@ public final class RenderLoop {
         }
 
         // Remove all team-registry and forwarding-tracker entries for this viewer.
-        this.teamRegistry.remove(viewerId);
-        this.modernTeamsForwarded.remove(viewerId);
+        this.teamRegistry.remove(playerId);
+        this.modernTeamsForwarded.remove(playerId);
 
         // Also scrub the player's name from every other viewer's registry entries
         // to avoid stale lookups if the player rejoins with the same name.
@@ -616,6 +643,7 @@ public final class RenderLoop {
         }
         this.states.clear();
         this.viewerIndex.clear();
+        this.targetIndex.clear();
         this.teamRegistry.clear();
         this.modernTeamsForwarded.clear();
     }
@@ -623,12 +651,12 @@ public final class RenderLoop {
     private void handleTick(int currentTick) {
         // Deduplicate by renderer identity — updateFrame/updatePlaceholders must be called
         // once per target, not once per (target, viewer) pair.
-        final var seen = new IdentityHashMap<TagRenderer, Player>(32);
+        // tickSeen is an instance field cleared here instead of being re-allocated every tick.
+        this.tickSeen.clear();
 
         for (final ViewerState state : this.states.values()) {
             if (!state.rendered || state.renderer == null) continue;
-            if (seen.containsKey(state.renderer)) continue;
-            seen.put(state.renderer, state.target);
+            if (!this.tickSeen.add(state.renderer)) continue;
 
             final int frameRate = state.renderer.frameUpdateRate();
             if (frameRate > 0 && currentTick % frameRate == 0) {
@@ -640,6 +668,9 @@ public final class RenderLoop {
                 state.renderer.updatePlaceholders(state);
             }
         }
+
+        // Clear to release renderer references between ticks.
+        this.tickSeen.clear();
     }
 
     // ── State access (drain-only) ─────────────────────────────────────────────
@@ -653,6 +684,9 @@ public final class RenderLoop {
             this.states.put(k, state);
             this.viewerIndex
                     .computeIfAbsent(viewer.getEntityId(), id -> new LongArrayList(4))
+                    .add(k);
+            this.targetIndex
+                    .computeIfAbsent(target.getEntityId(), id -> new LongArrayList(4))
                     .add(k);
         }
         return state;
