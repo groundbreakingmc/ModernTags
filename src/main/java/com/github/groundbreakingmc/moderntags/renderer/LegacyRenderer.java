@@ -30,7 +30,7 @@ import static com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayS
  * <p>Per-target state (team name, current frame, active viewers) is stored in
  * {@link #targetData}, keyed by Player reference. Viewers are mapped to their
  * {@link ViewerState} — not just a bare Set — so {@link #broadcastFullUpdate}
- * can read {@link ViewerState#teamSnapshot} for name-color resolution without
+ * can read {@link ViewerState#teamColor} for name-color resolution without
  * creating synthetic state objects.
  *
  * <p>The below-name objective is sent once per viewer lifetime and tracked in
@@ -271,8 +271,8 @@ public final class LegacyRenderer implements TagRenderer {
 
     /**
      * Sends a TEAM UPDATE + score packet to every active viewer.
-     * Iterates {@link TargetData#viewers} so {@link ViewerState#teamSnapshot} is available
-     * for name-color resolution without creating synthetic state objects.
+     * Iterates {@link TargetData#viewers} so {@link ViewerState#teamColor} is available
+     * for name-color resolution without any additional lookups.
      */
     private void broadcastFullUpdate(@NotNull Player target, @NotNull TargetData data) {
         final Frame frame = this.frames.get(data.currentFrame);
@@ -290,15 +290,17 @@ public final class LegacyRenderer implements TagRenderer {
 
     /**
      * Returns the effective name color. When {@code preserveTeamColor} is enabled,
-     * prefers the color from {@link ViewerState#teamSnapshot} unless it is in
+     * prefers the resolved color stored in {@link ViewerState#teamColor} unless it is in
      * {@code ignoredColors}. Falls back to the frame default.
+     *
+     * <p>The color is already a {@link NamedTextColor} (resolved at packet-intercept time
+     * by RenderLoop) so no further instanceof checks or casts are needed here.
      */
     private NamedTextColor resolveNameColor(@NotNull ViewerState state,
                                             @NotNull NamedTextColor frameDefault) {
         if (!this.preserveTeamColor) return frameDefault;
-        final ViewerState.TeamSnapshot snapshot = state.teamSnapshot;
-        if (snapshot == null) return frameDefault;
-        if (!(snapshot.color() instanceof NamedTextColor serverColor)) return frameDefault;
+        final NamedTextColor serverColor = state.teamColor;
+        if (serverColor == null) return frameDefault;
         if (this.ignoredColors.contains(serverColor)) return frameDefault;
         return serverColor;
     }
@@ -377,7 +379,7 @@ public final class LegacyRenderer implements TagRenderer {
         /**
          * Active viewers mapped to their {@link ViewerState}.
          * Storing the state (not just the Player) gives {@link #broadcastFullUpdate} access
-         * to {@link ViewerState#teamSnapshot} without any extra lookups.
+         * to {@link ViewerState#teamColor} without any extra lookups.
          */
         final Map<Player, ViewerState> viewers = new IdentityHashMap<>();
 

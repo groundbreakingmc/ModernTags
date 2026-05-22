@@ -3,6 +3,9 @@ package com.github.groundbreakingmc.moderntags.core;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 /**
  * Sealed task hierarchy posted to {@link RenderLoop} from any thread.
@@ -12,14 +15,14 @@ import org.jetbrains.annotations.NotNull;
  * are extracted at post-time by the calling thread, never inside RenderLoop.
  */
 public sealed interface RenderTask permits
-        RenderTask.Render,
-        RenderTask.StopRendering,
-        RenderTask.SuppressChange,
-        RenderTask.TeamUpdate,
-        RenderTask.PassengersUpdate,
         RenderTask.Cleanup,
         RenderTask.InitializeAll,
         RenderTask.InvalidateAll,
+        RenderTask.PassengersUpdate,
+        RenderTask.Render,
+        RenderTask.StopRendering,
+        RenderTask.SuppressChange,
+        RenderTask.TeamPacket,
         RenderTask.Tick {
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -53,14 +56,32 @@ public sealed interface RenderTask permits
     // ── Team packet ───────────────────────────────────────────────────────────
 
     /**
-     * Server sent a TEAMS CREATE/UPDATE packet (already cancelled by the handler).
-     * RenderLoop decides what to re-send per viewer.
+     * A TEAMS packet was intercepted for {@code viewer} (already cancelled by the handler).
+     *
+     * <p>Carries the complete original packet data so {@link RenderLoop} can make
+     * per-player routing decisions during drain:
+     * <ul>
+     *   <li><b>ModernRenderer players</b> — re-sent with {@code nameTagVisibility=NEVER} to
+     *       suppress the vanilla nametag; CREATE is tracked per-viewer to avoid sending UPDATE
+     *       before the client knows the team.</li>
+     *   <li><b>LegacyRenderer players</b> — packet is dropped (LegacyRenderer owns their team);
+     *       color/snapshot stored in {@link ViewerState#teamSnapshot} for name-color resolution.</li>
+     *   <li><b>Unmanaged players</b> — packet forwarded as-is, including info-only packets
+     *       (empty {@code players}) used by plugins like TAB for sidebar/tab-list display.</li>
+     * </ul>
+     *
+     * @param viewer   the player who would have received the packet
+     * @param teamName name of the scoreboard team
+     * @param mode     original packet mode (CREATE, UPDATE, ADD_ENTITIES, REMOVE_ENTITIES, REMOVE)
+     * @param info     team visual info; {@code null} for ADD_ENTITIES / REMOVE_ENTITIES / REMOVE
+     * @param players  player names carried by the packet; empty for UPDATE / REMOVE
      */
-    record TeamUpdate(
-            @NotNull Player target,
+    record TeamPacket(
             @NotNull Player viewer,
             @NotNull String teamName,
-            @NotNull WrapperPlayServerTeams.ScoreBoardTeamInfo info
+            @NotNull WrapperPlayServerTeams.TeamMode mode,
+            @Nullable WrapperPlayServerTeams.ScoreBoardTeamInfo info,
+            @NotNull List<String> players
     ) implements RenderTask {}
 
     // ── Passengers ────────────────────────────────────────────────────────────
