@@ -22,7 +22,6 @@ public final class PacketListener extends PacketListenerAbstract {
     private final SpawnEntityHandler spawnEntity;
     private final DestroyEntitiesHandler destroyEntities;
     private final DeathHandler death;
-    private final DisconnectHandler disconnect;
     private final PlayerInfoUpdateHandler playerInfoUpdate;
     private final PlayerInfoRemoveHandler playerInfoRemove;
     private final SetPassengersHandler setPassengers;
@@ -37,7 +36,6 @@ public final class PacketListener extends PacketListenerAbstract {
         this.spawnEntity = new SpawnEntityHandler(plugin, renderLoop);
         this.destroyEntities = new DestroyEntitiesHandler(renderLoop);
         this.death = new DeathHandler(renderLoop);
-        this.disconnect = new DisconnectHandler(renderLoop);
         this.playerInfoUpdate = new PlayerInfoUpdateHandler(renderLoop);
         this.playerInfoRemove = new PlayerInfoRemoveHandler(renderLoop);
         this.setPassengers = new SetPassengersHandler(renderLoop);
@@ -67,7 +65,6 @@ public final class PacketListener extends PacketListenerAbstract {
             case SPAWN_ENTITY -> this.spawnEntity.handle(event);
             case DESTROY_ENTITIES -> this.destroyEntities.handle(event);
             case ENTITY_STATUS -> this.death.handle(event);
-            case DISCONNECT -> this.disconnect.handle(event);
             case PLAYER_INFO_UPDATE -> this.playerInfoUpdate.handle(event);
             case PLAYER_INFO_REMOVE -> this.playerInfoRemove.handle(event);
             case SET_PASSENGERS -> this.setPassengers.handle(event);

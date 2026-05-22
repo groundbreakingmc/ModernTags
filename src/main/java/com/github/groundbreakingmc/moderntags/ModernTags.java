@@ -4,6 +4,7 @@ import com.github.groundbreakingmc.moderntags.command.ReloadCommand;
 import com.github.groundbreakingmc.moderntags.config.ConfigValues;
 import com.github.groundbreakingmc.moderntags.core.RenderLoop;
 import com.github.groundbreakingmc.moderntags.core.RenderTask;
+import com.github.groundbreakingmc.moderntags.listener.BukkitListener;
 import com.github.groundbreakingmc.moderntags.listener.PacketListener;
 import com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer;
 import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
@@ -51,6 +52,8 @@ public final class ModernTags extends JavaPlugin {
         this.packetListener = PacketEvents.getAPI().getEventManager().registerListener(
                 new PacketListener(this, this.renderLoop)
         );
+
+        super.getServer().getPluginManager().registerEvents(new BukkitListener(this.renderLoop), this);
 
         this.getCommand("moderntags").setExecutor(new ReloadCommand(this));
 
