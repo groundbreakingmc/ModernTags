@@ -1,37 +1,51 @@
-# Whether to parse <placeholder:prefix> and <placeholder:suffix> Vault placeholders using MiniMessage.
-# If false, they will be treated as legacy (&-formatted) strings.
+# Parse Vault prefix/suffix placeholders using MiniMessage format.
+# If false, treated as legacy (&-formatted) strings.
+# ──
+# Парсить плейсхолдеры Vault через MiniMessage.
+# false — обрабатывать как legacy (&-форматирование).
 vault-mm-formatting: false
 
-# Hide the tag when the player has passengers (e.g., another player riding them).
+# Hide the tag when another entity sits on the player.
+# ──
+# Скрыть тег, когда на игрока садится другая сущность.
 hide-tag-when-has-passenger: true
 
-# How often (in milliseconds) should ModernTags tick.
+# Plugin tick rate in milliseconds.
+# ──
+# Интервал тика плагина в миллисекундах.
 tick-rate: 50
 
+# Settings for the legacy below-name objective (shown to all clients).
+# ──
+# Настройки строки под ником для legacy-клиентов.
 legacy-general:
-  below-name-value: "owner:health" # do not use {} here
+  below-name-value: "owner:health" # do not use {} here / без фигурных скобок
   below-name-text: "&c❤"
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Tag groups
-# ──────────────────────────────────────────────────────────────────────────────
-# Groups are sorted by priority (highest wins).
-# owner-conditions  — evaluated once per tag owner
-# viewer-conditions — evaluated per viewer
+# Groups are sorted by priority — highest wins.
+# owner-conditions  — checked once per tag owner
+# viewer-conditions — checked per viewer
 #
-# Client version selection (TextDisplay vs Scoreboard Teams) is automatic:
-# each tag file contains both "modern" and "legacy" frame sections.
-# No need to specify protocol_version conditions manually.
-# ──────────────────────────────────────────────────────────────────────────────
+# Client version (TextDisplay vs Scoreboard Teams) is picked automatically
+# from the "modern" / "legacy" sections in each tag file.
+# ──
+# Группы тегов
+# Сортируются по приоритету — побеждает наибольший.
+# owner-conditions  — проверяется один раз для владельца тега
+# viewer-conditions — проверяется для каждого наблюдателя
+#
+# Версия клиента (TextDisplay / Scoreboard Teams) определяется автоматически
+# по секциям "modern" / "legacy" в файлах тегов.
 tags:
-  # ── Default group ───────────────────────────────────────────────────────────
+  # Default group / Группа по умолчанию
   - priority: 0
     entries:
       - priority: 0
         modern: tags/default.yml:<root>
         legacy: tags/default-legacy.yml:<root>
 
-  # ── VIP group ───────────────────────────────────────────────────────────────
+  # VIP group / VIP-группа
   - priority: 1
     owner-conditions: "hasPermission('moderntags.tag.vip')"
     entries:

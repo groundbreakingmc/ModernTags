@@ -1,64 +1,92 @@
-# Frame transition rate (in ticks), -1 to disable
+# Frame transition rate in ticks. -1 disables animation.
+# ──
+# Интервал смены кадров в тиках. -1 — анимация отключена.
 frame-update-rate: -1
-# Placeholder update rate (in ticks), -1 to disable
+
+# Placeholder update rate in ticks. -1 disables updates.
+# ──
+# Интервал обновления плейсхолдеров в тиках. -1 — обновление отключено.
 placeholders-update-rate: 10
 
 frames:
-  # First frame
   - text: |-
       {owner:prefix}&r{owner:name}{owner:suffix}
       &c❤&f{owner:health}
 
-    # NOTE: All parameters below show their default values.
-    # You can specify only "text" and the rest will use these defaults.
-
-    # Position offsets (float)
+    # Position offsets in blocks (float).
+    # ──
+    # Смещение позиции в блоках (float).
     x-offset: 0.0
     y-offset: 0.15
     z-offset: 0.0
 
-    # Opacity on player sneaks | from -128 to 127
+    # Tag opacity when the owner is sneaking (-128 to 127).
+    # ──
+    # Прозрачность тега при приседании владельца (-128 до 127).
     opacity: 60
 
-    # Scale (float, default 1.0)
+    # Tag scale (float).
+    # ──
+    # Масштаб тега (float).
     scale: 1.0
 
-    # Billboard behavior (boolean)
+    # If true, the tag stays vertical regardless of view angle.
+    # ──
+    # Если true, тег остаётся вертикальным при любом угле обзора.
     vertical-billboard: false
 
-    # Brightness in "type-strength" format
-    # Type: "block" or "sky"
-    # Strength: 0-15
+    # Brightness: "block-<0-15>" or "sky-<0-15>".
+    # ──
+    # Яркость: "block-<0-15>" или "sky-<0-15>".
     brightness: "block-15"
 
-    # View range in blocks (float)
+    # View range in blocks (float).
+    # ──
+    # Дальность видимости в блоках (float).
     view-range: 1.0
 
-    # Shadow parameters (float)
+    # Shadow parameters (float).
+    # ──
+    # Параметры тени (float).
     shadow-radius: 0.0
     shadow-strength: 1.0
 
-    # Line width (integer)
+    # Max line width in pixels (integer).
+    # ──
+    # Максимальная ширина строки в пикселях (integer).
     line-width: 200
 
-    # Background color (hex or integer)
-    # Format: #RRGGBB (6 digits) or #AARRGGBB (8 digits with alpha)
-    background-color: "#00000000"  # Transparent
-
-    # Text opacity (-128-127)
-    text-opacity: -1
-
-    # Text opacity on player sneaks (-128-127)
-    sneak-text-opacity: 60
-
-    # Shadow rendering (boolean)
-    shadowed: true
-
-    # See-through mode (boolean)
-    see-through: false
-
-    # Use default background (boolean)
+    # Use the standard Minecraft text background instead of background-color.
+    # ──
+    # Использовать стандартный фон Minecraft вместо background-color.
     default-background: false
 
-    # Text alignment: LEFT, CENTER, or RIGHT
+    # Background color: #RRGGBB or #AARRGGBB.
+    # ──
+    # Цвет фона: #RRGGBB или #AARRGGBB.
+    background-color: "#00000000"  # Transparent / Прозрачный
+
+    # Text opacity (-128 to 127). -1 = fully opaque.
+    # ──
+    # Прозрачность текста (-128 до 127). -1 = полностью непрозрачный.
+    text-opacity: -1
+
+    # Text opacity when the owner is sneaking (-128 to 127).
+    # ──
+    # Прозрачность текста при приседании (-128 до 127).
+    sneak-text-opacity: 60
+
+    # Render text shadow.
+    # ──
+    # Отрисовывать тень текста.
+    shadowed: true
+
+    # Show the tag through solid blocks.
+    # ──
+    # Показывать тег сквозь блоки.
+    see-through: false
+
+    # Text alignment: LEFT, CENTER, or RIGHT.
+    # ──
+    # Выравнивание текста: LEFT, CENTER или RIGHT.
     alignment: "CENTER"

@@ -1,32 +1,53 @@
 modern:
+  # Frame transition rate in ticks. -1 disables animation.
+  # ──
+  # Интервал смены кадров в тиках. -1 — анимация отключена.
   frame-update-rate: 10
+
+  # Placeholder update rate in ticks.
+  # ──
+  # Интервал обновления плейсхолдеров в тиках.
   placeholders-update-rate: 10
 
   frames:
-    # Frame 0 — gold stars
+    # Frame 0 — gold stars / Кадр 0 — золотые звёзды
     - text: |-
         &6★ {owner:prefix}&r&e{owner:name}{owner:suffix} &r&6★
         &c❤&f{owner:health}
 
-    # Frame 1 — yellow stars
+    # Frame 1 — yellow stars / Кадр 1 — жёлтые звёзды
     - text: |-
         &e✦ {owner:prefix}&r&e{owner:name}{owner:suffix} &r&e✦
         &c❤&f{owner:health}
 
 legacy:
+  # Frame transition rate in ticks.
+  # ──
+  # Интервал смены кадров в тиках.
   frame-update-rate: 10
+
+  # Placeholder update rate in ticks.
+  # ──
+  # Интервал обновления плейсхолдеров в тиках.
   placeholders-update-rate: 10
 
-  # LegacyRenderer reads these at the top level (no tab-settings wrapper —
-  # legacy uses scoreboard TEAMS directly and has no override/tab-mode concept).
+  # Keep the player name color set by other plugins (e.g. glow plugins).
+  # ──
+  # Сохранять цвет ника, установленный другими плагинами (например, glow).
   preserve-player-name-color: true
+
+  # Colors treated as "no color set" — the frame's name-color is used instead.
+  # ──
+  # Цвета, считающиеся «не заданными» — вместо них применяется name-color кадра.
   ignored-colors: [ "white" ]
 
   frames:
+    # Frame 0 — yellow stars / Кадр 0 — жёлтые звёзды
     - prefix: "&e✦ {owner:prefix}"
       name-color: "yellow"
       suffix: "{owner:suffix} &e✦"
 
+    # Frame 1 — gold stars / Кадр 1 — золотые звёзды
     - prefix: "&6★ {owner:prefix}"
       name-color: "yellow"
       suffix: "{owner:suffix} &6★"
