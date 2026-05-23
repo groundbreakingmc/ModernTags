@@ -1,9 +1,4 @@
-# ModernTags
-
-![Failed to load image](images/preview.png)
-
-Современный плагин для отображения кастомных тегов над головами игроков с использованием Text Display entities (1.19.4+)
-и автоматическим переключением на Scoreboard Teams для более старых клиентов.
+![Failed to load image](images/preview_ru.png)
 
 ## Основной функционал
 

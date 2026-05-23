@@ -1,9 +1,4 @@
-# ModernTags
-
 ![Failed to load image](images/preview.png)
-
-A modern plugin for displaying custom tags above player heads using Text Display entities (1.19.4+) with automatic
-fallback to Scoreboard Teams for older clients.
 
 ## Core Features
 
