@@ -20,11 +20,6 @@ frames:
     y-offset: 0.15
     z-offset: 0.0
 
-    # Tag opacity when the owner is sneaking (-128 to 127).
-    # ──
-    # Прозрачность тега при приседании владельца (-128 до 127).
-    opacity: 60
-
     # Tag scale (float).
     # ──
     # Масштаб тега (float).
