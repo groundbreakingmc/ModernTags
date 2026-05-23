@@ -476,7 +476,7 @@ public final class ModernRenderer implements TagRenderer {
         b.shadowStrength((float) config.doubleOr("shadow-strength", 1.0));
         b.lineWidth(config.intOr("line-width", 200));
         b.textOpacity((byte) config.intOr("text-opacity", -1));
-        b.sneakTextOpacity((byte) config.intOr("sneak-text-opacity", 60));
+        b.sneakTextOpacity((byte) config.intOr("sneak-opacity", 60));
         b.shadowed(config.boolOr("shadowed", true));
         b.seeThrough(config.boolOr("see-through", false));
         b.defaultBackground(config.boolOr("default-background", false));

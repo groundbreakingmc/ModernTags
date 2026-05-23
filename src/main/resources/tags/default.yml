@@ -74,7 +74,7 @@ frames:
     # Text opacity when the owner is sneaking (-128 to 127).
     # ──
     # Прозрачность текста при приседании (-128 до 127).
-    sneak-text-opacity: 60
+    sneak-opacity: 60
 
     # Render text shadow.
     # ──
