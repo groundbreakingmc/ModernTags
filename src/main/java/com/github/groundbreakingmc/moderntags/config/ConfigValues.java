@@ -232,7 +232,7 @@ public final class ConfigValues {
     private Config loadFile(Map<String, Config> cache, String relativePath, String context) {
         try {
             return cache.computeIfAbsent(relativePath, path ->
-                    ConfigFactory.of(this.pluginFolder).file(path).backend(ConfigBackends.CONFIGURATE_YAML).load()
+                    ConfigFactory.of(new File(this.pluginFolder, path)).backend(ConfigBackends.CONFIGURATE_YAML).load()
             );
         } catch (Exception ex) {
             throw new RuntimeException(
