@@ -103,7 +103,7 @@ public final class TagTextResolver {
                 }
 
                 if (key.startsWith("viewer:")) {
-                    yield this.papiComponent(viewer, key.substring(6));
+                    yield this.papiComponent(viewer, key.substring(7));
                 }
 
                 this.logger.warning(
