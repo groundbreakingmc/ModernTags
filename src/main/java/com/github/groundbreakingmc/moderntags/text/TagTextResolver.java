@@ -4,6 +4,7 @@ import com.github.groundbreakingmc.gikymessage.Text;
 import com.github.groundbreakingmc.moderntags.util.NumberUtils;
 import me.clip.placeholderapi.PlaceholderAPIPlugin;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
+import me.clip.placeholderapi.expansion.Relational;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
@@ -106,6 +107,10 @@ public final class TagTextResolver {
                     yield this.papiComponent(viewer, key.substring(7));
                 }
 
+                if (key.startsWith("rel:")) {
+                    yield this.relationalComponent(viewer, owner, key.substring(4));
+                }
+
                 this.logger.warning(
                         "Unknown placeholder '" + key + "'. " +
                                 "If this is intended to be plain text and not a placeholder, " +
@@ -147,6 +152,28 @@ public final class TagTextResolver {
 
         final String params = sep != -1 ? key.substring(sep + 1) : "";
         final String result = expansion.onRequest(player, params);
+        return result != null ? Component.text(result) : null;
+    }
+
+    private @Nullable Component relationalComponent(
+            @NotNull Player viewer,
+            @NotNull Player owner,
+            @NotNull String key
+    ) {
+        if (!this.supportsPapi) return null;
+
+        final int sep = key.indexOf('_');
+        if (sep == -1) return null;
+
+        final PlaceholderExpansion expansion = PlaceholderAPIPlugin.getInstance()
+                .getLocalExpansionManager()
+                .getExpansion(key.substring(0, sep));
+
+        if (!(expansion instanceof Relational relational)) return null;
+
+        final String result = relational.onPlaceholderRequest(
+                viewer, owner, key.substring(sep + 1)
+        );
         return result != null ? Component.text(result) : null;
     }
 
