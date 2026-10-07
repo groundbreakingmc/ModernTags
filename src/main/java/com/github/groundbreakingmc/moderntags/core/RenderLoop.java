@@ -216,15 +216,8 @@ public final class RenderLoop {
             return;
         }
 
-        final TagRenderer renderer = this.resolveRenderer(target, viewer);
-        state.renderer = renderer;
-
-        if (renderer == null) return;
-
-        if (state.isSuppressed()) return; // applyCurrentState will re-render when suppression clears
-
-        renderer.render(state);
-        state.rendered = true;
+        state.renderer = this.resolveRenderer(target, viewer);
+        this.applyCurrentState(state);
     }
 
     private void handleStop(@NotNull Player target, @NotNull Player viewer) {
