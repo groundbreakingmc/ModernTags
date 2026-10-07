@@ -193,6 +193,7 @@ public final class RenderLoop {
         }
 
         if (target == viewer && !viewer.hasPermission("moderntags.see.own")) {
+            state.renderer = null;
             return;
         }
 
@@ -214,6 +215,7 @@ public final class RenderLoop {
             state.renderer.stopRendering(state);
             state.rendered = false;
         }
+        state.renderer = null;
     }
 
     private void handleSuppress(@NotNull RenderTask.SuppressChange s) {
