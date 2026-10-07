@@ -74,7 +74,7 @@ public final class LegacyRenderer implements TagRenderer {
         this.tagTextResolver = tagTextResolver;
         this.belowNameValueParser = belowNameValueParser;
         this.belowNameChar = belowNameChar;
-        this.frameUpdateRate = frameUpdateRate;
+        this.frameUpdateRate = frames.size() > 1 ? frameUpdateRate : -1;
         this.placeholdersUpdateRate = placeholdersUpdateRate;
         this.preserveTeamColor = preserveTeamColor;
         this.ignoredColors = ignoredColors;

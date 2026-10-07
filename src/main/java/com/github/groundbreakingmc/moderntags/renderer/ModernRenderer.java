@@ -62,7 +62,7 @@ public final class ModernRenderer implements TagRenderer {
                            int placeholdersUpdateRate,
                            @NotNull List<Frame> frames) {
         this.plugin = plugin;
-        this.frameUpdateRate = frameUpdateRate;
+        this.frameUpdateRate = frames.size() > 1 ? frameUpdateRate : -1;
         this.placeholdersUpdateRate = placeholdersUpdateRate;
         this.frames = frames;
     }
