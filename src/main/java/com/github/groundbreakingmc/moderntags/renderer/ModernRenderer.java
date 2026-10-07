@@ -232,12 +232,10 @@ public final class ModernRenderer implements TagRenderer {
                 TEXT_COMPONENT_INDEX, EntityDataTypes.ADV_COMPONENT,
                 this.plugin.tagTextResolver().resolve(state.target, state.viewer, frame.text())
         ));
-        if (!data.viewers.containsKey(state.viewer)) {
-            metadata.add(new EntityData<>(
-                    TEXT_OPACITY_INDEX, EntityDataTypes.BYTE,
-                    state.hasSuppress(ViewerState.SUPPRESS_SNEAK) ? frame.sneakOpacity() : frame.defaultOpacity()
-            ));
-        }
+        metadata.add(new EntityData<>(
+                TEXT_OPACITY_INDEX, EntityDataTypes.BYTE,
+                state.hasSuppress(ViewerState.SUPPRESS_SNEAK) ? frame.sneakOpacity() : frame.defaultOpacity()
+        ));
         return new WrapperPlayServerEntityMetadata(data.tagEntityId, metadata);
     }
 
