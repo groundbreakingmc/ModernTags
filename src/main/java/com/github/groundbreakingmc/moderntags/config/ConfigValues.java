@@ -67,7 +67,7 @@ public final class ConfigValues {
     public void setup() {
         final Config root;
         try {
-            root = ConfigFactory.of(this.pluginFolder).backend(ConfigBackends.CONFIGURATE_YAML).load();
+            root = ConfigFactory.of(new File(this.pluginFolder, "config.yml")).backend(ConfigBackends.CONFIGURATE_YAML).load();
         } catch (Exception ex) {
             throw new RuntimeException("[ModernTags] Failed to load config.yml from \"" + this.pluginFolder + "\"", ex);
         }
