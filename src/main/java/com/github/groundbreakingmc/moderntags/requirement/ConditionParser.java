@@ -151,15 +151,21 @@ public final class ConditionParser {
 
         if (peek == '%') {
             this.consume();
-            final String placeholder = '%' + this.parseIdentifier() + '%';
+            final String key = this.parseIdentifier();
             this.expect("%");
-            final int i = placeholder.indexOf('_');
-            final String identifier = i != -1
-                    ? placeholder.substring(0, i)
-                    : placeholder;
+
+            final int sep = key.indexOf('_');
+            final String identifier = (sep != -1 ? key.substring(0, sep) : key)
+                    .toLowerCase(Locale.ROOT);
+            final String params = sep != -1 ? key.substring(sep + 1) : "";
+
             return ctx -> {
-                final PlaceholderExpansion expansion = PlaceholderAPIPlugin.getInstance().getLocalExpansionManager().getExpansion(identifier);
-                return expansion != null ? expansion.onRequest(ctx.player(), placeholder) : "no expansion found for placeholder: %" + placeholder + "%";
+                final PlaceholderExpansion expansion = PlaceholderAPIPlugin.getInstance()
+                        .getLocalExpansionManager()
+                        .getExpansion(identifier);
+                return expansion != null
+                        ? expansion.onRequest(ctx.player(), params)
+                        : "no expansion found for placeholder: %" + key + "%";
             };
         }
 
