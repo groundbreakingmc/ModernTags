@@ -723,6 +723,9 @@ public final class RenderLoop {
         ViewerState state = this.states.get(k);
         if (state == null) {
             state = new ViewerState(target, viewer);
+            if (target.isInvisible()) {
+                state.addSuppress(ViewerState.SUPPRESS_INVISIBLE);
+            }
             this.states.put(k, state);
             this.viewerIndex
                     .computeIfAbsent(viewer.getEntityId(), id -> new LongArrayList(4))
