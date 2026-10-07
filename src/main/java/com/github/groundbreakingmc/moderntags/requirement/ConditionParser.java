@@ -45,25 +45,23 @@ public final class ConditionParser {
     private Condition parseOr() {
         Condition left = this.parseAnd();
 
-        while (this.match("||")) {
-            skipWhitespace();
-            final Condition right = parseAnd();
-            left = new OrCondition(left, right);
-        }
+        while (true) {
+            this.skipWhitespace();
+            if (!this.match("||")) return left;
 
-        return left;
+            left = new OrCondition(left, this.parseAnd());
+        }
     }
 
     private Condition parseAnd() {
         Condition left = this.parseUnary();
 
-        while (this.match("&&")) {
+        while (true) {
             this.skipWhitespace();
-            final Condition right = this.parseUnary();
-            left = new AndCondition(left, right);
-        }
+            if (!this.match("&&")) return left;
 
-        return left;
+            left = new AndCondition(left, this.parseUnary());
+        }
     }
 
     private Condition parseUnary() {
