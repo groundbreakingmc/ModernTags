@@ -116,11 +116,10 @@ public final class RenderLoop {
     private final ArrayList<String> reuseUnmanagedNames = new ArrayList<>();
 
     /**
-     * Reused across every {@link #handleTick} call to deduplicate renderer visits.
-     * Allocated once; cleared at the start of each tick instead of re-created.
+     * Targets visited per renderer during a tick. Sets are reused between ticks
+     * and cleared after each traversal so they do not retain players.
      */
-    private final Set<TagRenderer> tickSeen =
-            Collections.newSetFromMap(new IdentityHashMap<>(32));
+    private final Map<TagRenderer, Set<Player>> tickSeen = new IdentityHashMap<>(32);
 
     private final ProtocolManager protocolManager = PacketEvents.getAPI().getProtocolManager();
 
@@ -646,33 +645,35 @@ public final class RenderLoop {
         this.states.clear();
         this.viewerIndex.clear();
         this.targetIndex.clear();
+        this.tickSeen.clear();
         this.teamRegistry.clear();
         this.modernTeamsForwarded.clear();
     }
 
     private void handleTick(int currentTick) {
-        // Deduplicate by renderer identity — updateFrame/updatePlaceholders must be called
-        // once per target, not once per (target, viewer) pair.
-        // tickSeen is an instance field cleared here instead of being re-allocated every tick.
-        this.tickSeen.clear();
+        // Advance each target once per renderer, regardless of its viewer count.
+        try {
+            for (final ViewerState state : this.states.values()) {
+                if (!state.rendered || state.renderer == null) continue;
+                if (!this.tickSeen.computeIfAbsent(state.renderer,
+                        renderer -> Collections.newSetFromMap(new IdentityHashMap<>()))
+                        .add(state.target)) continue;
 
-        for (final ViewerState state : this.states.values()) {
-            if (!state.rendered || state.renderer == null) continue;
-            if (!this.tickSeen.add(state.renderer)) continue;
-
-            final int frameRate = state.renderer.frameUpdateRate();
-            if (frameRate > 0 && currentTick % frameRate == 0) {
-                state.renderer.updateFrame(state);
-                continue;
+                final int frameRate = state.renderer.frameUpdateRate();
+                if (frameRate > 0 && currentTick % frameRate == 0) {
+                    state.renderer.updateFrame(state);
+                    continue;
+                }
+                final int placeholderRate = state.renderer.placeholdersUpdateRate();
+                if (placeholderRate > 0 && currentTick % placeholderRate == 0) {
+                    state.renderer.updatePlaceholders(state);
+                }
             }
-            final int placeholderRate = state.renderer.placeholdersUpdateRate();
-            if (placeholderRate > 0 && currentTick % placeholderRate == 0) {
-                state.renderer.updatePlaceholders(state);
+        } finally {
+            for (final Set<Player> targets : this.tickSeen.values()) {
+                targets.clear();
             }
         }
-
-        // Clear to release renderer references between ticks.
-        this.tickSeen.clear();
     }
 
     // ── State access (drain-only) ─────────────────────────────────────────────

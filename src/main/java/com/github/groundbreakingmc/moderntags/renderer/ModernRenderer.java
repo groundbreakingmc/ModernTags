@@ -104,7 +104,7 @@ public final class ModernRenderer implements TagRenderer {
             }
         }, PASSENGER_DELAY_MS, TimeUnit.MILLISECONDS);
 
-        data.viewers.add(state.viewer);
+        data.viewers.put(state.viewer, state);
     }
 
     @Override
@@ -124,14 +124,14 @@ public final class ModernRenderer implements TagRenderer {
         if (data == null) return;
 
         data.currentFrame = (data.currentFrame + 1) % this.frames.size();
-        this.broadcastMetadata(state, data);
+        this.broadcastMetadata(data);
     }
 
     @Override
     public void updatePlaceholders(@NotNull ViewerState state) {
         final TargetData data = this.targetData.get(state.target);
         if (data == null) return;
-        this.broadcastMetadata(state, data);
+        this.broadcastMetadata(data);
     }
 
     @Override
@@ -145,7 +145,7 @@ public final class ModernRenderer implements TagRenderer {
         if (data == null) return;
 
         final var destroyPacket = createDestroyPacket(data.tagEntityId);
-        for (final Player viewer : data.viewers) {
+        for (final Player viewer : data.viewers.keySet()) {
             PacketEvents.getAPI().getPlayerManager().sendPacketSilently(viewer, destroyPacket);
         }
     }
@@ -202,10 +202,10 @@ public final class ModernRenderer implements TagRenderer {
 
     // ── Broadcast ─────────────────────────────────────────────────────────────
 
-    private void broadcastMetadata(@NotNull ViewerState state, @NotNull TargetData data) {
+    private void broadcastMetadata(@NotNull TargetData data) {
         final Frame frame = this.frames.get(data.currentFrame);
-        for (final Player viewer : data.viewers) {
-            final Object channel = this.protocolManager.getChannel(viewer.getUniqueId());
+        for (final ViewerState state : data.viewers.values()) {
+            final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
             if (channel == null) continue;
             this.protocolManager.sendPacketSilently(channel,
                     this.createMetadataPacket(state, data, frame));
@@ -232,7 +232,7 @@ public final class ModernRenderer implements TagRenderer {
                 TEXT_COMPONENT_INDEX, EntityDataTypes.ADV_COMPONENT,
                 this.plugin.tagTextResolver().resolve(state.target, state.viewer, frame.text())
         ));
-        if (!data.viewers.contains(state.viewer)) {
+        if (!data.viewers.containsKey(state.viewer)) {
             metadata.add(new EntityData<>(
                     TEXT_OPACITY_INDEX, EntityDataTypes.BYTE,
                     state.hasSuppress(ViewerState.SUPPRESS_SNEAK) ? frame.sneakOpacity() : frame.defaultOpacity()
@@ -270,7 +270,7 @@ public final class ModernRenderer implements TagRenderer {
          * Viewers currently seeing this target's tag. Maintained for broadcast in
          * {@link #updateFrame}/{@link #updatePlaceholders}; mirrors RenderLoop's authoritative list.
          */
-        final Set<Player> viewers = Collections.newSetFromMap(new IdentityHashMap<>());
+        final Map<Player, ViewerState> viewers = new IdentityHashMap<>();
     }
 
     // ── Frame ─────────────────────────────────────────────────────────────────
