@@ -139,6 +139,7 @@ public final class ModernTags extends JavaPlugin {
         this.configValues.setup();
         this.tagTextResolver.miniMessageVault(this.configValues.useMinimessageColorizer());
         this.renderLoop.groups(this.configValues.tags());
+        this.renderLoop.conditionsRecheckRate(this.configValues.conditionsRecheckRate());
         this.renderLoop.hideTagWhenHasPassenger(this.configValues.hideTagWhenHasPassenger());
     }
 

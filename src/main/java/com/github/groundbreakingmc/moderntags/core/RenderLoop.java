@@ -128,6 +128,7 @@ public final class RenderLoop {
 
     private ImmutableList<TagGroup> groups = ImmutableList.of();
     private boolean hideTagWhenHasPassenger = true;
+    private int conditionsRecheckRate = 20;
 
     public RenderLoop(@NotNull Logger logger) {
         this.logger = logger;
@@ -141,6 +142,10 @@ public final class RenderLoop {
 
     public void hideTagWhenHasPassenger(boolean v) {
         this.hideTagWhenHasPassenger = v;
+    }
+
+    public void conditionsRecheckRate(int rate) {
+        this.conditionsRecheckRate = rate;
     }
 
     // ── Public API (any thread) ───────────────────────────────────────────────
@@ -198,9 +203,10 @@ public final class RenderLoop {
 
     private void handleRender(@NotNull Player target, @NotNull Player viewer) {
         final ViewerState state = this.getOrCreate(target, viewer);
+        state.active = true;
 
         // Tear down whatever was rendering before (renderer may have changed on reload).
-        if (state.rendered && state.renderer != null) {
+        if (state.renderer != null) {
             state.renderer.stopRendering(state);
             state.rendered = false;
         }
@@ -213,6 +219,8 @@ public final class RenderLoop {
         final TagRenderer renderer = this.resolveRenderer(target, viewer);
         state.renderer = renderer;
 
+        if (renderer == null) return;
+
         if (state.isSuppressed()) return; // applyCurrentState will re-render when suppression clears
 
         renderer.render(state);
@@ -223,8 +231,9 @@ public final class RenderLoop {
         final long key = key(target, viewer);
         final ViewerState state = this.states.get(key);
         if (state == null) return;
+        state.active = false;
 
-        if (state.rendered && state.renderer != null) {
+        if (state.renderer != null) {
             state.renderer.stopRendering(state);
             state.rendered = false;
         }
@@ -664,7 +673,30 @@ public final class RenderLoop {
         this.modernTeamsForwarded.clear();
     }
 
+    private void recheckConditions() {
+        for (final ViewerState state : this.states.values()) {
+            if (!state.active) continue;
+
+            final TagRenderer renderer = state.target == state.viewer
+                    && !state.viewer.hasPermission("moderntags.see.own")
+                    ? null : this.resolveRenderer(state.target, state.viewer);
+            if (renderer == state.renderer) continue;
+
+            if (state.renderer != null) {
+                state.renderer.stopRendering(state);
+            }
+            state.rendered = false;
+            state.renderer = renderer;
+            this.applyCurrentState(state);
+        }
+    }
+
     private void handleTick(int currentTick) {
+        if (this.conditionsRecheckRate > 0
+                && currentTick % this.conditionsRecheckRate == 0) {
+            this.recheckConditions();
+        }
+
         // Advance each target once per renderer, regardless of its viewer count.
         try {
             for (final ViewerState state : this.states.values()) {
@@ -716,7 +748,7 @@ public final class RenderLoop {
 
     // ── Renderer resolution ───────────────────────────────────────────────────
 
-    @NotNull
+    @Nullable
     private TagRenderer resolveRenderer(@NotNull Player target, @NotNull Player viewer) {
         final Context ownerCtx = new Context(target);
         for (final TagGroup group : this.groups) {
@@ -728,7 +760,7 @@ public final class RenderLoop {
                 }
             }
         }
-        throw new IllegalStateException("No matching TagGroup — ensure a catch-all group exists");
+        return null;
     }
 
     // ── Packet helpers ────────────────────────────────────────────────────────

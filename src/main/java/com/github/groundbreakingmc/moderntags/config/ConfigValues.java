@@ -44,6 +44,7 @@ public final class ConfigValues {
     private boolean useMinimessageColorizer;
     private boolean hideTagWhenHasPassenger;
     private int tickRate;
+    private int conditionsRecheckRate;
     private ToIntBiFunction<Player, Player> belowNameValueParser;
     private Component belowNameChar;
     private List<TagGroup> tags;
@@ -84,6 +85,10 @@ public final class ConfigValues {
         return this.hideTagWhenHasPassenger;
     }
 
+    public int conditionsRecheckRate() {
+        return this.conditionsRecheckRate;
+    }
+
     public int tickRate() {
         return this.tickRate;
     }
@@ -106,6 +111,10 @@ public final class ConfigValues {
         this.useMinimessageColorizer = root.findBool("vault-mm-formatting");
         this.hideTagWhenHasPassenger = root.findBool("hide-tag-when-has-passenger");
         this.tickRate = root.findInt("tick-rate");
+        this.conditionsRecheckRate = root.intOr("conditions-recheck-rate", 20);
+        if (this.conditionsRecheckRate != -1 && this.conditionsRecheckRate <= 0) {
+            throw new IllegalArgumentException("conditions-recheck-rate must be -1 or a positive integer");
+        }
         final String belowNameValue = root.findStr("legacy-general.below-name-value");
         this.belowNameValueParser = belowNameValue.equals("owner:health")
                 ? (target, viewer) -> NumberUtils.healthToInt(target.getHealth())

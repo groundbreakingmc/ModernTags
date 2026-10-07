@@ -53,6 +53,12 @@ public final class ViewerState {
     public boolean rendered;
 
     /**
+     * Whether rendering is requested for this pair, even if no tag currently matches.
+     * Cleared by an explicit stop; temporary suppression does not change it.
+     */
+    public boolean active;
+
+    /**
      * Resolved name color from the last server-sent TEAMS packet for this (target, viewer) pair.
      * Used by {@link com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer}
      * to honour {@code preserve-player-name-color} without re-reading live packet data.

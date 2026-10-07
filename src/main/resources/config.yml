@@ -15,6 +15,14 @@ hide-tag-when-has-passenger: true
 # Интервал тика плагина в миллисекундах.
 tick-rate: 50
 
+# Recheck owner and viewer conditions every N plugin ticks.
+# -1 — check only when rendering is triggered, e.g. on spawn or teleport.
+# ──
+# Повторно проверять условия владельца и наблюдателя каждые N тиков плагина.
+# -1 — отключить периодическую проверку; проверять при спавне, телепортации
+#      и других событиях, вызывающих пересоздание тега.
+conditions-recheck-rate: 20
+
 # Settings for the legacy below-name objective (shown to all clients).
 # ──
 # Настройки строки под ником для legacy-клиентов.
