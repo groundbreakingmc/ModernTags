@@ -35,7 +35,7 @@ public final class ModernTags extends JavaPlugin {
         this.saveDefaultConfig();
 
         this.tagTextResolver = this.createTagTextResolver();
-        this.renderLoop = new RenderLoop();
+        this.renderLoop = new RenderLoop(this.getLogger());
 
         this.configValues = new ConfigValues(this.getDataFolder(), this.tagTextResolver);
         this.configValues.registerModernFactory(cfg -> ModernRenderer.of(this, cfg));

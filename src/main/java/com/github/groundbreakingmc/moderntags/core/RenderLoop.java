@@ -21,6 +21,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Single owner of all {@link ViewerState} objects and the only writer to them.
@@ -59,6 +61,7 @@ public final class RenderLoop {
 
     private final MpscArrayQueue<RenderTask> queue = new MpscArrayQueue<>(QUEUE_CAPACITY);
     private final AtomicBoolean draining = new AtomicBoolean(false);
+    private final Logger logger;
 
     /**
      * (target.entityId << 32) | viewer.entityId → ViewerState.
@@ -126,6 +129,10 @@ public final class RenderLoop {
     private ImmutableList<TagGroup> groups = ImmutableList.of();
     private boolean hideTagWhenHasPassenger = true;
 
+    public RenderLoop(@NotNull Logger logger) {
+        this.logger = logger;
+    }
+
     // ── Configuration ─────────────────────────────────────────────────────────
 
     public void groups(@NotNull List<TagGroup> groups) {
@@ -139,9 +146,8 @@ public final class RenderLoop {
     // ── Public API (any thread) ───────────────────────────────────────────────
 
     /**
-     * Posts a task for processing during the next drain. Lock-free, never blocks.
-     * Tasks dropped when the queue is full (capacity {@value QUEUE_CAPACITY}) — acceptable
-     * for visual-only updates.
+     * Enqueues a task and attempts to drain the queue on the calling thread.
+     * Tasks are dropped when the queue is full (capacity {@value QUEUE_CAPACITY}).
      */
     public void post(@NotNull RenderTask task) {
         this.queue.offer(task);
@@ -151,17 +157,25 @@ public final class RenderLoop {
     // ── Drain ─────────────────────────────────────────────────────────────────
 
     private void tryDrain() {
-        if (!this.draining.compareAndSet(false, true)) {
-            return; // another thread is already draining; our task will be picked up
-        }
         do {
-            RenderTask task;
-            while ((task = this.queue.poll()) != null) {
-                this.processTask(task);
+            if (!this.draining.compareAndSet(false, true)) {
+                return;
             }
-            // Release. If a task was enqueued between the last poll and this CAS,
-            // the CAS fails and we loop again to ensure nothing is left behind.
-        } while (!this.draining.compareAndSet(true, false));
+
+            try {
+                RenderTask task;
+                while ((task = this.queue.poll()) != null) {
+                    try {
+                        this.processTask(task);
+                    } catch (RuntimeException ex) {
+                        this.logger.log(Level.SEVERE,
+                                "Failed to process render task: " + task, ex);
+                    }
+                }
+            } finally {
+                this.draining.set(false);
+            }
+        } while (!this.queue.isEmpty());
     }
 
     // ── Task dispatch ─────────────────────────────────────────────────────────
