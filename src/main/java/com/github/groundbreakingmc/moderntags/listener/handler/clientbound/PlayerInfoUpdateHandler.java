@@ -31,20 +31,21 @@ public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
 
         if (actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER)) {
             final Player viewer = event.getPlayer();
-            final Player target = Bukkit.getPlayer(
-                    packet.getEntries().get(0).getGameProfile().getUUID());
-            if (target != null) {
+            for (final var entry : packet.getEntries()) {
+                final Player target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
+                if (target == null) continue;
                 this.renderLoop.post(new RenderTask.Render(target, viewer));
             }
         } else if (actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE)) {
-            final var entry = packet.getEntries().get(0);
             final Player viewer = event.getPlayer();
-            final Player target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
-            if (target == null) return;
-            if (entry.getGameMode() == GameMode.SPECTATOR) {
-                this.renderLoop.post(new RenderTask.StopRendering(target, viewer));
-            } else {
-                this.renderLoop.post(new RenderTask.Render(target, viewer));
+            for (final var entry : packet.getEntries()) {
+                final Player target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
+                if (target == null) continue;
+                if (entry.getGameMode() == GameMode.SPECTATOR) {
+                    this.renderLoop.post(new RenderTask.StopRendering(target, viewer));
+                } else {
+                    this.renderLoop.post(new RenderTask.Render(target, viewer));
+                }
             }
         }
     }
