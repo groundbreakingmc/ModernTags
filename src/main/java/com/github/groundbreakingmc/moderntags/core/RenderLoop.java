@@ -2,6 +2,7 @@ package com.github.groundbreakingmc.moderntags.core;
 
 import com.github.groundbreakingmc.moderntags.config.model.TagEntry;
 import com.github.groundbreakingmc.moderntags.config.model.TagGroup;
+import com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer;
 import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
 import com.github.groundbreakingmc.moderntags.renderer.TagRenderer;
 import com.github.groundbreakingmc.moderntags.requirement.Context;
@@ -38,15 +39,15 @@ import java.util.logging.Logger;
  * <p>Map keys are {@code long}: {@code (target.entityId << 32) | viewer.entityId}.
  * Entity IDs are unique 32-bit ints for the duration of a session, so there are no
  * collisions. This avoids boxing and object allocation on the hot path.
- *
+ * <p>
  * <h3>Team packet routing</h3>
  * <p>All TEAMS packets are cancelled by {@link com.github.groundbreakingmc.moderntags.listener.handler.clientbound.UpdateTeamHandler}
  * and posted as {@link RenderTask.TeamPacket}. During drain, {@link #handleTeamPacket} classifies
  * each player in the packet into one of three buckets:
  * <ol>
  *   <li><b>ModernRenderer</b> — re-sent with {@code nameTagVisibility=NEVER}. The first send
- *       uses {@code TeamMode.CREATE} (tracked in {@link #modernTeamsForwarded}); subsequent sends
- *       use the original mode so the client always has a valid team before any UPDATE arrives.</li>
+ *       uses {@code TeamMode.CREATE}; {@link #clientTeams} tracks external team existence and
+ *       membership independently of renderer state so later updates and removals are valid.</li>
  *   <li><b>LegacyRenderer</b> — packet suppressed (LegacyRenderer owns the player's team);
  *       color stored in {@link ViewerState#teamColor} for {@code preserve-player-name-color}.</li>
  *   <li><b>Unmanaged / info-only</b> — forwarded unchanged, preserving sidebar and tab-list teams
@@ -95,16 +96,12 @@ public final class RenderLoop {
             new Int2ObjectOpenHashMap<>(64);
 
     /**
-     * viewer.entityId → set of teamNames for which we have forwarded a CREATE packet
-     * to the client with {@code nameTagVisibility=NEVER} (ModernRenderer path).
-     *
-     * <p>Ensures we never send UPDATE before CREATE: if the original packet mode is
-     * UPDATE but the client has not yet seen CREATE, we promote the send to CREATE.
-     * Entries are removed when the team is REMOVE'd so a future CREATE resets cleanly.
-     *
-     * <p>Drain-only access — no synchronisation needed.
+     * External teams and memberships actually forwarded to each viewer.
+     * Unlike renderer state, these survive reload while the client keeps its scoreboard.
+     * Legacy team creation removes its target from this external-only membership ledger.
+     * Drain-only access.
      */
-    private final Int2ObjectOpenHashMap<Set<String>> modernTeamsForwarded =
+    private final Int2ObjectOpenHashMap<ClientTeamView> clientTeams =
             new Int2ObjectOpenHashMap<>(64);
 
     // ── Per-call reusable buffers (drain-only, never escape handleTeamPacket) ─────────────────
@@ -354,7 +351,16 @@ public final class RenderLoop {
 
         if (!state.rendered) {
             this.invalidateRender(state);
-            state.renderer.render(state);
+            final boolean legacyClaimsTeam = state.renderer instanceof LegacyRenderer
+                    && this.protocolManager.getChannel(state.viewer.getUniqueId()) != null;
+            try {
+                state.renderer.render(state);
+            } finally {
+                if (legacyClaimsTeam) {
+                    // Legacy may have sent CREATE before a later placeholder evaluation fails.
+                    this.forgetExternalMembership(state.viewer.getEntityId(), state.target.getName());
+                }
+            }
             state.rendered = true;
         }
 
@@ -401,12 +407,13 @@ public final class RenderLoop {
 
         // ── Step 1: Resolve affected players ─────────────────────────────────
         // For REMOVE the protocol sends no player list; read the registry before clearing.
-        // For any mode with an empty player list (e.g. UPDATE, info-only CREATE) we also
-        // pull the current membership so classification can proceed correctly.
+        // UPDATE has no membership payload, so classify its existing members as well.
+        // Empty CREATE/ADD/REMOVE_ENTITIES must retain their empty membership payload.
         // No copy is needed: REMOVE only removes the Set from the map (step 2), it does
         // not modify the Set itself, so a direct reference is safe to iterate afterward.
         final Collection<String> affectedPlayers;
-        if (mode == WrapperPlayServerTeams.TeamMode.REMOVE || t.players().isEmpty()) {
+        if (mode == WrapperPlayServerTeams.TeamMode.REMOVE
+                || mode == WrapperPlayServerTeams.TeamMode.UPDATE && t.players().isEmpty()) {
             final Map<String, Set<String>> viewerTeams = this.teamRegistry.get(viewerId);
             affectedPlayers = (viewerTeams != null)
                     ? viewerTeams.getOrDefault(t.teamName(), Set.of())
@@ -491,28 +498,19 @@ public final class RenderLoop {
 
             // Re-render so the new (or cleared) color is applied immediately.
             if (state.rendered) {
+                //noinspection DataFlowIssue
                 state.renderer.updatePlaceholders(state);
             }
         }
 
         // ── Step 7: Re-send for unmanaged players (and info-only packets) ─────
-        this.resendForUnmanagedPlayers(t, channel, mode, this.reuseUnmanagedNames, affectedPlayers.isEmpty());
+        this.resendForUnmanagedPlayers(t, viewerId, channel, mode,
+                this.reuseUnmanagedNames, affectedPlayers.isEmpty());
     }
 
     /**
-     * Re-sends the team packet for ModernRenderer-managed players with
-     * {@code nameTagVisibility=NEVER} to suppress the vanilla nametag.
-     *
-     * <h3>CREATE tracking</h3>
-     * <p>The client must receive {@code TeamMode.CREATE} before any {@code UPDATE}.
-     * {@link #modernTeamsForwarded} tracks which (viewer, teamName) pairs have already
-     * had CREATE forwarded.  If the original mode is UPDATE but CREATE has not been
-     * forwarded yet, this method promotes the send to CREATE automatically.
-     *
-     * <h3>REMOVE_ENTITIES</h3>
-     * <p>Intentionally not forwarded: keeping the player in the NEVER-visibility team
-     * suppresses the vanilla nametag without interruption. When the player joins a
-     * different team (ADD_ENTITIES), that team will receive NEVER visibility too.
+     * Re-sends external teams for modern targets with vanilla nametags hidden.
+     * Member removals remain suppressed until an add transfers the entry elsewhere.
      */
     private void resendForModernPlayers(
             @NotNull RenderTask.TeamPacket t,
@@ -522,53 +520,30 @@ public final class RenderLoop {
             @NotNull List<String> modernPlayers) {
 
         if (mode == WrapperPlayServerTeams.TeamMode.REMOVE) {
-            // Forward REMOVE only if we previously forwarded CREATE for this team.
-            // Remove from tracker so a future CREATE resets cleanly.
-            final Set<String> forwarded = this.modernTeamsForwarded.get(viewerId);
-            if (forwarded != null && forwarded.remove(t.teamName())) {
-                this.protocolManager.sendPacketSilently(channel, buildTeamRemovePacket(t.teamName()));
-            }
+            this.sendClientTeam(viewerId, channel, t.teamName(), mode, null, List.of());
             return;
         }
-
         if (modernPlayers.isEmpty()) return;
 
         switch (mode) {
             case CREATE, UPDATE -> {
-                if (t.info() == null) return; // shouldn't happen, but guard anyway
-
-                final Set<String> forwarded = this.modernTeamsForwarded
-                        .computeIfAbsent(viewerId, $ -> new HashSet<>());
-                final boolean alreadyCreated = forwarded.contains(t.teamName());
-
-                // Promote UPDATE → CREATE if the client has not yet seen CREATE for this team.
-                final WrapperPlayServerTeams.TeamMode sendMode = alreadyCreated
-                        ? WrapperPlayServerTeams.TeamMode.UPDATE
-                        : WrapperPlayServerTeams.TeamMode.CREATE;
-
-                if (!alreadyCreated) forwarded.add(t.teamName());
-
-                this.protocolManager.sendPacketSilently(channel,
-                        new WrapperPlayServerTeams(t.teamName(), sendMode,
-                                makeNeverInfo(t.info()), modernPlayers));
+                if (t.info() != null) {
+                    this.sendClientTeam(viewerId, channel, t.teamName(), mode,
+                            makeNeverInfo(t.info()), modernPlayers);
+                }
             }
             case ADD_ENTITIES -> {
-                // The team must already exist on the client (CREATE was forwarded earlier).
-                // ADD_ENTITIES carries no info, so we just forward players into the existing team;
-                // it already has nameTagVisibility=NEVER from the CREATE.
-                final Set<String> forwarded = this.modernTeamsForwarded.get(viewerId);
-                if (forwarded != null && forwarded.contains(t.teamName())) {
-                    this.protocolManager.sendPacketSilently(channel,
-                            new WrapperPlayServerTeams(t.teamName(),
-                                    WrapperPlayServerTeams.TeamMode.ADD_ENTITIES,
-                                    (WrapperPlayServerTeams.ScoreBoardTeamInfo) null, modernPlayers));
+                final ClientTeamView view = this.clientTeams.get(viewerId);
+                final ClientTeam team = view != null ? view.teams.get(t.teamName()) : null;
+                if (team == null) return;
+                // An empty or unmanaged CREATE may have forwarded the original visibility.
+                if (team.info.getTagVisibility() != WrapperPlayServerTeams.NameTagVisibility.NEVER) {
+                    this.sendClientTeam(viewerId, channel, t.teamName(),
+                            WrapperPlayServerTeams.TeamMode.UPDATE, makeNeverInfo(team.info), List.of());
                 }
-                // Edge case: if CREATE was never forwarded (shouldn't happen in practice),
-                // we silently skip — the player will be caught on the next CREATE/UPDATE.
+                this.sendClientTeam(viewerId, channel, t.teamName(), mode, null, modernPlayers);
             }
-            case REMOVE_ENTITIES -> {
-                // Not forwarded intentionally — see Javadoc above.
-            }
+            case REMOVE_ENTITIES -> { /* keep modern targets in their hidden-name team */ }
         }
     }
 
@@ -586,6 +561,7 @@ public final class RenderLoop {
      */
     private void resendForUnmanagedPlayers(
             @NotNull RenderTask.TeamPacket t,
+            int viewerId,
             @NotNull Object channel,
             @NotNull WrapperPlayServerTeams.TeamMode mode,
             @NotNull List<String> unmanagedPlayers,
@@ -596,15 +572,12 @@ public final class RenderLoop {
                 // Re-send if there are unmanaged players, OR if the packet had no players at all
                 // (info-only packet — e.g. TAB sidebar/tab-list display team).
                 if (!unmanagedPlayers.isEmpty() || noAffectedPlayers) {
-                    this.protocolManager.sendPacketSilently(channel,
-                            new WrapperPlayServerTeams(t.teamName(), mode, t.info(), unmanagedPlayers));
+                    this.sendClientTeam(viewerId, channel, t.teamName(), mode, t.info(), unmanagedPlayers);
                 }
             }
             case ADD_ENTITIES, REMOVE_ENTITIES -> {
                 if (!unmanagedPlayers.isEmpty()) {
-                    this.protocolManager.sendPacketSilently(channel,
-                            new WrapperPlayServerTeams(t.teamName(), mode,
-                                    (WrapperPlayServerTeams.ScoreBoardTeamInfo) null, unmanagedPlayers));
+                    this.sendClientTeam(viewerId, channel, t.teamName(), mode, null, unmanagedPlayers);
                 }
             }
             case REMOVE -> {
@@ -613,13 +586,107 @@ public final class RenderLoop {
                 //  b) The original packet had no affected players at all (empty-player-list team
                 //     whose CREATE we forwarded verbatim in a previous packet).
                 //
-                // Note: ModernRenderer REMOVE is handled in resendForModernPlayers; sending REMOVE
-                // a second time for the same teamName is harmless (client ignores unknown team removal).
+                // The shared sender also prevents a second REMOVE after the modern path sent it.
                 if (!unmanagedPlayers.isEmpty() || noAffectedPlayers) {
-                    this.protocolManager.sendPacketSilently(channel,
-                            buildTeamRemovePacket(t.teamName()));
+                    this.sendClientTeam(viewerId, channel, t.teamName(), mode, null, List.of());
                 }
             }
+        }
+    }
+
+    /**
+     * Sends external team operations while retaining the client-side membership they produce.
+     * In particular, REMOVE_ENTITIES is valid only for entries still in that exact team.
+     */
+    private void sendClientTeam(int viewerId, @NotNull Object channel, @NotNull String name,
+                                @NotNull WrapperPlayServerTeams.TeamMode mode,
+                                @Nullable WrapperPlayServerTeams.ScoreBoardTeamInfo info,
+                                @NotNull List<String> players) {
+        ClientTeamView view = this.clientTeams.get(viewerId);
+        ClientTeam team = view != null ? view.teams.get(name) : null;
+        switch (mode) {
+            case CREATE, UPDATE -> {
+                if (info == null) return;
+                final boolean create = team == null;
+                this.sendTeam(channel, name, create
+                        ? WrapperPlayServerTeams.TeamMode.CREATE : WrapperPlayServerTeams.TeamMode.UPDATE,
+                        info, create ? players : List.of());
+                if (view == null) {
+                    view = new ClientTeamView();
+                    this.clientTeams.put(viewerId, view);
+                }
+                if (create) {
+                    team = new ClientTeam(info);
+                    view.teams.put(name, team);
+                } else {
+                    team.info = info;
+                }
+                // UPDATE carries no members: a repeated CREATE needs a separate ADD.
+                if (create || mode == WrapperPlayServerTeams.TeamMode.CREATE) {
+                    if (!create && !players.isEmpty()) {
+                        this.sendTeam(channel, name, WrapperPlayServerTeams.TeamMode.ADD_ENTITIES, null, players);
+                    }
+                    this.addClientMembers(view, team, players);
+                }
+            }
+            case ADD_ENTITIES -> {
+                if (team == null || players.isEmpty()) return;
+                this.sendTeam(channel, name, mode, null, players);
+                this.addClientMembers(view, team, players);
+            }
+            case REMOVE_ENTITIES -> {
+                if (team == null || players.isEmpty()) return;
+                final Set<String> removals = new LinkedHashSet<>(players.size());
+                for (final String player : players) {
+                    if (view.memberships.get(player) == team) {
+                        removals.add(player);
+                    }
+                }
+                if (removals.isEmpty()) return;
+                this.sendTeam(channel, name, mode, null, removals);
+                for (final String player : removals) {
+                    view.memberships.remove(player);
+                    team.members.remove(player);
+                }
+            }
+            case REMOVE -> {
+                if (team == null) return;
+                this.sendTeam(channel, name, mode, null, null);
+                view.teams.remove(name);
+                for (final String member : team.members) {
+                    view.memberships.remove(member, team);
+                }
+            }
+        }
+    }
+
+    private void addClientMembers(@NotNull ClientTeamView view, @NotNull ClientTeam team,
+                                  @NotNull List<String> members) {
+        for (final String member : members) {
+            final ClientTeam previous = view.memberships.put(member, team);
+            if (previous != null && previous != team) previous.members.remove(member);
+            team.members.add(member);
+        }
+    }
+
+    private void forgetExternalMembership(int viewerId, @NotNull String member) {
+        final ClientTeamView view = this.clientTeams.get(viewerId);
+        if (view == null) return;
+        final ClientTeam previous = view.memberships.remove(member);
+        if (previous != null) previous.members.remove(member);
+    }
+
+    private static final class ClientTeamView {
+        private final Map<String, ClientTeam> teams = new HashMap<>();
+        private final Map<String, ClientTeam> memberships = new HashMap<>();
+    }
+
+    private static final class ClientTeam {
+        private WrapperPlayServerTeams.ScoreBoardTeamInfo info;
+        private final Set<String> members = new HashSet<>();
+
+        private ClientTeam(@NotNull WrapperPlayServerTeams.ScoreBoardTeamInfo info) {
+            this.info = info;
         }
     }
 
@@ -705,7 +772,7 @@ public final class RenderLoop {
 
         // Remove all team-registry and forwarding-tracker entries for this viewer.
         this.teamRegistry.remove(playerId);
-        this.modernTeamsForwarded.remove(playerId);
+        this.clientTeams.remove(playerId);
 
         // Also scrub the player's name from every other viewer's registry entries
         // to avoid stale lookups if the player rejoins with the same name.
@@ -741,7 +808,7 @@ public final class RenderLoop {
         this.targetIndex.clear();
         this.tickSeen.clear();
         this.teamRegistry.clear();
-        this.modernTeamsForwarded.clear();
+        // External client teams survive renderer invalidation and reload.
     }
 
     private void recheckConditions() {
@@ -823,8 +890,8 @@ public final class RenderLoop {
         return state;
     }
 
-    @Nullable
-    public ViewerState getState(@NotNull Player target, @NotNull Player viewer) {
+    @SuppressWarnings("unused")
+    public @Nullable ViewerState getState(@NotNull Player target, @NotNull Player viewer) {
         return this.states.get(key(target, viewer));
     }
 
@@ -864,12 +931,11 @@ public final class RenderLoop {
         );
     }
 
-    private static WrapperPlayServerTeams buildTeamRemovePacket(@NotNull String teamName) {
-        return new WrapperPlayServerTeams(
-                teamName, WrapperPlayServerTeams.TeamMode.REMOVE,
-                (WrapperPlayServerTeams.ScoreBoardTeamInfo) null,
-                (Collection<String>) null
-        );
+    private void sendTeam(@NotNull Object channel, @NotNull String name,
+                          @NotNull WrapperPlayServerTeams.TeamMode mode,
+                          @Nullable WrapperPlayServerTeams.ScoreBoardTeamInfo info,
+                          @Nullable Collection<String> players) {
+        this.protocolManager.sendPacketSilently(channel, new WrapperPlayServerTeams(name, mode, info, players));
     }
 
     private void sendPassengers(@NotNull Object channel, int vehicleEntityId, int @NotNull [] passengers) {
