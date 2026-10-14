@@ -62,7 +62,7 @@ public final class PacketListener extends PacketListenerAbstract {
         if (!(event.getPacketType() instanceof PacketType.Play.Server type)) return;
 
         switch (type) {
-            case SPAWN_ENTITY -> this.spawnEntity.handle(event);
+            case SPAWN_ENTITY, SPAWN_PLAYER -> this.spawnEntity.handle(event);
             case DESTROY_ENTITIES -> this.destroyEntities.handle(event);
             case ENTITY_STATUS -> this.death.handle(event);
             case PLAYER_INFO_UPDATE -> this.playerInfoUpdate.handle(event);

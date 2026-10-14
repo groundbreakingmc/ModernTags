@@ -7,6 +7,7 @@ import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacket
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import org.bukkit.Bukkit;
@@ -16,7 +17,7 @@ import org.jetbrains.annotations.NotNull;
 import java.util.UUID;
 
 /**
- * Renders a player's tag when their SPAWN_ENTITY packet arrives at the viewer.
+ * Renders a player's tag on SPAWN_ENTITY or the older SPAWN_PLAYER packet.
  *
  * <p>Self-spawns are skipped — handled by {@link PlayerPositionHandler} via PLAYER_POSITION_AND_LOOK.
  * The render loop registers the spawn immediately and validates its 1 ms delayed render.
@@ -43,7 +44,9 @@ public final class SpawnEntityHandler implements ClientBoundPacketHandler {
 
         final UUID uniqueId = wrapper.readUUID();
 
-        if (EntityTypes.getById(this.serverVersion, wrapper.readVarInt()) != EntityTypes.PLAYER) return;
+        // SPAWN_PLAYER carries no entity-type field before its coordinates.
+        if (event.getPacketType() != PacketType.Play.Server.SPAWN_PLAYER
+                && EntityTypes.getById(this.serverVersion, wrapper.readVarInt()) != EntityTypes.PLAYER) return;
 
         final Player target = Bukkit.getPlayer(uniqueId);
         if (target == null) return;
