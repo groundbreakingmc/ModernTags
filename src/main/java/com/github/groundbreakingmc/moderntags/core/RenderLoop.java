@@ -189,6 +189,7 @@ public final class RenderLoop {
     private void processTask(@NotNull RenderTask task) {
         switch (task) {
             case RenderTask.Render(var target, var viewer) -> this.handleRender(target, viewer);
+            case RenderTask.AttachTag a -> this.handleAttach(a);
             case RenderTask.ScheduleRender s -> this.handleScheduleRender(s);
             case RenderTask.RenderWhenCurrent r -> this.handleRenderWhenCurrent(r);
             case RenderTask.StopRendering(var target, var viewer) -> this.handleStop(target, viewer);
@@ -230,9 +231,20 @@ public final class RenderLoop {
         this.handleRender(state.target, state.viewer);
     }
 
+    private void handleAttach(@NotNull RenderTask.AttachTag attachment) {
+        final ViewerState state = attachment.state();
+        if (this.states.get(key(state.target, state.viewer)) != state
+                || state.pendingAttach != attachment || !attachment.ready().get()
+                || state.renderGeneration != attachment.generation()
+                || !state.active || !state.rendered || state.renderer != attachment.renderer()) return;
+        state.pendingAttach = null;
+        attachment.renderer().attachPassengers(state, attachment.tagEntityId(), attachment.channel());
+    }
+
     private void invalidateRender(@NotNull ViewerState state) {
         state.renderGeneration++;
         state.pendingSpawn = null;
+        state.pendingAttach = null;
     }
 
     private void handleRender(@NotNull Player target, @NotNull Player viewer) {
@@ -737,6 +749,9 @@ public final class RenderLoop {
                 // Recover ready callbacks even if their queue offer was dropped during a burst.
                 if (state.pendingSpawn != null && state.pendingSpawn.ready().get()) {
                     this.handleRenderWhenCurrent(state.pendingSpawn);
+                }
+                if (state.pendingAttach != null && state.pendingAttach.ready().get()) {
+                    this.handleAttach(state.pendingAttach);
                 }
                 if (!state.rendered || state.renderer == null) continue;
                 if (!this.tickSeen.computeIfAbsent(state.renderer,

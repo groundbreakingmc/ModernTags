@@ -1,5 +1,6 @@
 package com.github.groundbreakingmc.moderntags.core;
 
+import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
@@ -16,6 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * accessed only during drain; delayed callbacks publish readiness and post their token.
  */
 public sealed interface RenderTask permits
+        RenderTask.AttachTag,
         RenderTask.Cleanup,
         RenderTask.InitializeAll,
         RenderTask.InvalidateAll,
@@ -49,6 +51,16 @@ public sealed interface RenderTask permits
                              @NotNull AtomicBoolean ready) implements RenderTask {
         public RenderWhenCurrent(@NotNull ViewerState state, long generation) {
             this(state, generation, new AtomicBoolean());
+        }
+    }
+
+    /** A delayed attachment is valid only for the renderer and generation that spawned it. */
+    record AttachTag(@NotNull ViewerState state, long generation,
+                     @NotNull ModernRenderer renderer, int tagEntityId, @NotNull Object channel,
+                     @NotNull AtomicBoolean ready) implements RenderTask {
+        public AttachTag(@NotNull ViewerState state, long generation,
+                         @NotNull ModernRenderer renderer, int tagEntityId, @NotNull Object channel) {
+            this(state, generation, renderer, tagEntityId, channel, new AtomicBoolean());
         }
     }
 

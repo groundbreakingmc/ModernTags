@@ -2,6 +2,8 @@ package com.github.groundbreakingmc.moderntags.renderer;
 
 import com.github.groundbreakingmc.gikymessage.Text;
 import com.github.groundbreakingmc.moderntags.ModernTags;
+import com.github.groundbreakingmc.moderntags.core.RenderLoop;
+import com.github.groundbreakingmc.moderntags.core.RenderTask;
 import com.github.groundbreakingmc.moderntags.core.ViewerState;
 import com.github.groundbreakingmc.moderntags.text.TagTextResolver;
 import com.github.groundbreakingmc.mylib.config.Config;
@@ -97,15 +99,30 @@ public final class ModernRenderer implements TagRenderer {
         this.protocolManager.sendPacketSilently(channel,
                 this.createMetadataPacket(state, data, frame));
 
-        // Attach the tag as a passenger after a short delay to ensure the client has processed the spawn.
+        // Validate delayed attachment on the render loop after the client has processed the spawn.
+        final RenderLoop renderLoop = this.plugin.renderLoop();
+        final RenderTask.AttachTag attachment = new RenderTask.AttachTag(
+                state, state.renderGeneration, this, data.tagEntityId, channel);
+        state.pendingAttach = attachment;
         Bukkit.getAsyncScheduler().runDelayed(this.plugin, task -> {
-            if (state.target.isOnline() && !state.target.isDead() && ChannelHelper.isOpen(channel)) {
-                this.protocolManager.sendPacketSilently(channel,
-                        createSetPassengersWithTag(state.target, data.tagEntityId));
-            }
+            attachment.ready().set(true);
+            renderLoop.post(attachment);
         }, PASSENGER_DELAY_MS, TimeUnit.MILLISECONDS);
 
         data.viewers.put(state.viewer, state);
+    }
+
+    /**
+     * Attaches a current tag after the render loop validates its state and generation.
+     * Called only during drain, which owns target data and viewer membership.
+     */
+    public void attachPassengers(@NotNull ViewerState state, int tagEntityId, @NotNull Object channel) {
+        final TargetData data = this.targetData.get(state.target);
+        if (data == null || data.tagEntityId != tagEntityId || data.viewers.get(state.viewer) != state) return;
+        if (state.target.isOnline() && !state.target.isDead() && ChannelHelper.isOpen(channel)) {
+            this.protocolManager.sendPacketSilently(channel,
+                    createSetPassengersWithTag(state.target, tagEntityId));
+        }
     }
 
     @Override

@@ -64,6 +64,9 @@ public final class ViewerState {
     /** Current delayed native spawn; the reference is owned by the render loop. */
     public @Nullable RenderTask.RenderWhenCurrent pendingSpawn;
 
+    /** Current delayed attachment; the reference is owned by the render loop. */
+    public @Nullable RenderTask.AttachTag pendingAttach;
+
     /**
      * Resolved name color from the last server-sent TEAMS packet for this (target, viewer) pair.
      * Used by {@link com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer}
