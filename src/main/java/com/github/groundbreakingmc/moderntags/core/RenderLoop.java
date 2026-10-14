@@ -21,6 +21,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -188,6 +189,8 @@ public final class RenderLoop {
     private void processTask(@NotNull RenderTask task) {
         switch (task) {
             case RenderTask.Render(var target, var viewer) -> this.handleRender(target, viewer);
+            case RenderTask.ScheduleRender s -> this.handleScheduleRender(s);
+            case RenderTask.RenderWhenCurrent r -> this.handleRenderWhenCurrent(r);
             case RenderTask.StopRendering(var target, var viewer) -> this.handleStop(target, viewer);
             case RenderTask.SuppressChange s -> this.handleSuppress(s);
             case RenderTask.TeamPacket t -> this.handleTeamPacket(t);
@@ -201,8 +204,40 @@ public final class RenderLoop {
 
     // ── Handlers ─────────────────────────────────────────────────────────────
 
+    private void handleScheduleRender(@NotNull RenderTask.ScheduleRender spawn) {
+        final ViewerState state = this.getOrCreate(spawn.target(), spawn.viewer());
+        this.handleStop(spawn.target(), spawn.viewer());
+        final RenderTask.RenderWhenCurrent pending = new RenderTask.RenderWhenCurrent(
+                state, state.renderGeneration);
+        state.pendingSpawn = pending;
+        try {
+            Bukkit.getAsyncScheduler().runDelayed(spawn.plugin(), task -> {
+                pending.ready().set(true);
+                this.post(pending);
+            }, 1L, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException ex) {
+            this.invalidateRender(state);
+            throw ex;
+        }
+    }
+
+    private void handleRenderWhenCurrent(@NotNull RenderTask.RenderWhenCurrent pending) {
+        final ViewerState state = pending.state();
+        if (this.states.get(key(state.target, state.viewer)) != state
+                || state.pendingSpawn != pending || !pending.ready().get()
+                || state.renderGeneration != pending.generation()) return;
+        state.pendingSpawn = null;
+        this.handleRender(state.target, state.viewer);
+    }
+
+    private void invalidateRender(@NotNull ViewerState state) {
+        state.renderGeneration++;
+        state.pendingSpawn = null;
+    }
+
     private void handleRender(@NotNull Player target, @NotNull Player viewer) {
         final ViewerState state = this.getOrCreate(target, viewer);
+        this.invalidateRender(state);
         state.active = true;
 
         // Tear down whatever was rendering before (renderer may have changed on reload).
@@ -224,6 +259,7 @@ public final class RenderLoop {
         final long key = key(target, viewer);
         final ViewerState state = this.states.get(key);
         if (state == null) return;
+        this.invalidateRender(state);
         state.active = false;
 
         if (state.renderer != null) {
@@ -272,6 +308,7 @@ public final class RenderLoop {
 
         if (fullyHidden) {
             if (state.rendered) {
+                this.invalidateRender(state);
                 state.renderer.hide(state);
                 state.rendered = false;
             }
@@ -279,6 +316,7 @@ public final class RenderLoop {
         }
 
         if (!state.rendered) {
+            this.invalidateRender(state);
             state.renderer.render(state);
             state.rendered = true;
         }
@@ -677,6 +715,7 @@ public final class RenderLoop {
                     ? null : this.resolveRenderer(state.target, state.viewer);
             if (renderer == state.renderer) continue;
 
+            this.invalidateRender(state);
             if (state.renderer != null) {
                 state.renderer.stopRendering(state);
             }
@@ -695,6 +734,10 @@ public final class RenderLoop {
         // Advance each target once per renderer, regardless of its viewer count.
         try {
             for (final ViewerState state : this.states.values()) {
+                // Recover ready callbacks even if their queue offer was dropped during a burst.
+                if (state.pendingSpawn != null && state.pendingSpawn.ready().get()) {
+                    this.handleRenderWhenCurrent(state.pendingSpawn);
+                }
                 if (!state.rendered || state.renderer == null) continue;
                 if (!this.tickSeen.computeIfAbsent(state.renderer,
                         renderer -> Collections.newSetFromMap(new IdentityHashMap<>()))

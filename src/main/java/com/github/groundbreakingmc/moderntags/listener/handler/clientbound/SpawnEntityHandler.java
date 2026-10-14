@@ -14,13 +14,12 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Renders a player's tag when their SPAWN_ENTITY packet arrives at the viewer.
  *
  * <p>Self-spawns are skipped — handled by {@link PlayerPositionHandler} via PLAYER_POSITION_AND_LOOK.
- * A 1 ms async delay is applied so both sides are fully tracked before the render is posted.
+ * The render loop registers the spawn immediately and validates its 1 ms delayed render.
  */
 public final class SpawnEntityHandler implements ClientBoundPacketHandler {
 
@@ -49,8 +48,6 @@ public final class SpawnEntityHandler implements ClientBoundPacketHandler {
         final Player target = Bukkit.getPlayer(uniqueId);
         if (target == null) return;
 
-        Bukkit.getAsyncScheduler().runDelayed(this.plugin, task ->
-                        this.renderLoop.post(new RenderTask.Render(target, viewer)),
-                1L, TimeUnit.MILLISECONDS);
+        this.renderLoop.post(new RenderTask.ScheduleRender(target, viewer, this.plugin));
     }
 }

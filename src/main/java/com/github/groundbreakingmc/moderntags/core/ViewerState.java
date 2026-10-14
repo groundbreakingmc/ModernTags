@@ -58,6 +58,12 @@ public final class ViewerState {
      */
     public boolean active;
 
+    /** Invalidates delayed operations whenever this pair's rendering changes. */
+    public long renderGeneration;
+
+    /** Current delayed native spawn; the reference is owned by the render loop. */
+    public @Nullable RenderTask.RenderWhenCurrent pendingSpawn;
+
     /**
      * Resolved name color from the last server-sent TEAMS packet for this (target, viewer) pair.
      * Used by {@link com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer}

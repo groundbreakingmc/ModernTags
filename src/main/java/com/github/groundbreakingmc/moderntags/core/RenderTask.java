@@ -2,17 +2,18 @@ package com.github.groundbreakingmc.moderntags.core;
 
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Sealed task hierarchy posted to {@link RenderLoop} from any thread.
  *
- * <p>All subtypes are plain data carriers — no logic, no Bukkit API calls.
- * Fields that come from the Bukkit API (entity IDs, passenger arrays, etc.)
- * are extracted at post-time by the calling thread, never inside RenderLoop.
+ * <p>Tasks carry events and delayed-operation tokens. Mutable rendering state is
+ * accessed only during drain; delayed callbacks publish readiness and post their token.
  */
 public sealed interface RenderTask permits
         RenderTask.Cleanup,
@@ -20,6 +21,8 @@ public sealed interface RenderTask permits
         RenderTask.InvalidateAll,
         RenderTask.PassengersUpdate,
         RenderTask.Render,
+        RenderTask.ScheduleRender,
+        RenderTask.RenderWhenCurrent,
         RenderTask.StopRendering,
         RenderTask.SuppressChange,
         RenderTask.TeamPacket,
@@ -36,6 +39,18 @@ public sealed interface RenderTask permits
      * Stop rendering and destroy the client-side tag entity.
      */
     record StopRendering(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
+
+    /** Registers a native player spawn before scheduling its delayed tag render. */
+    record ScheduleRender(@NotNull Player target, @NotNull Player viewer,
+                          @NotNull Plugin plugin) implements RenderTask {}
+
+    /** The readiness marker is the only field published by the scheduler callback. */
+    record RenderWhenCurrent(@NotNull ViewerState state, long generation,
+                             @NotNull AtomicBoolean ready) implements RenderTask {
+        public RenderWhenCurrent(@NotNull ViewerState state, long generation) {
+            this(state, generation, new AtomicBoolean());
+        }
+    }
 
     // ── State changes ─────────────────────────────────────────────────────────
 
