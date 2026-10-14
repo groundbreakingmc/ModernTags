@@ -642,10 +642,12 @@ public final class RenderLoop {
         }
     }
 
+    @SuppressWarnings("deprecation")
     private void handleInitializeAll() {
-        final var players = Bukkit.getOnlinePlayers();
-        for (final Player target : players) {
-            for (final Player viewer : players) {
+        for (final Player target : Bukkit.getOnlinePlayers()) {
+            // The entity tracker excludes the target itself; preserve permission-gated own tags.
+            this.handleRender(target, target);
+            for (final Player viewer : target.getTrackedPlayers()) {
                 this.handleRender(target, viewer);
             }
         }
