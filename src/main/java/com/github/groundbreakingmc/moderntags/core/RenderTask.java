@@ -23,8 +23,10 @@ public sealed interface RenderTask permits
         RenderTask.InvalidateAll,
         RenderTask.PassengersUpdate,
         RenderTask.Render,
+        RenderTask.RenderIfTracked,
         RenderTask.ScheduleRender,
         RenderTask.RenderWhenCurrent,
+        RenderTask.StopTracking,
         RenderTask.StopRendering,
         RenderTask.SuppressChange,
         RenderTask.TeamPacket,
@@ -41,6 +43,9 @@ public sealed interface RenderTask permits
      * Stop rendering and destroy the client-side tag entity.
      */
     record StopRendering(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
+
+    /** Refreshes an existing tracked pair; tab-list membership alone does not establish tracking. */
+    record RenderIfTracked(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
 
     /** Registers a native player spawn before scheduling its delayed tag render. */
     record ScheduleRender(@NotNull Player target, @NotNull Player viewer,
@@ -63,6 +68,9 @@ public sealed interface RenderTask permits
             this(state, generation, renderer, tagEntityId, channel, new AtomicBoolean());
         }
     }
+
+    /** Ends native player tracking and cancels rendering, including a pending spawn. */
+    record StopTracking(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
 
     // ── State changes ─────────────────────────────────────────────────────────
 

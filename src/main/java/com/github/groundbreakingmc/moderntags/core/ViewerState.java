@@ -58,6 +58,9 @@ public final class ViewerState {
      */
     public boolean active;
 
+    /** Whether a native spawn or initialization established this viewer's tracking. */
+    public boolean tracked;
+
     /** Invalidates delayed operations whenever this pair's rendering changes. */
     public long renderGeneration;
 

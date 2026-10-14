@@ -27,7 +27,7 @@ public final class DestroyEntitiesHandler implements ClientBoundPacketHandler {
         for (final int entityId : packet.getEntityIds()) {
             final Player target = PlayerLookup.playerById(entityId);
             if (target != null) {
-                this.renderLoop.post(new RenderTask.StopRendering(target, viewer));
+                this.renderLoop.post(new RenderTask.StopTracking(target, viewer));
             }
         }
     }

@@ -189,9 +189,11 @@ public final class RenderLoop {
     private void processTask(@NotNull RenderTask task) {
         switch (task) {
             case RenderTask.Render(var target, var viewer) -> this.handleRender(target, viewer);
+            case RenderTask.RenderIfTracked(var target, var viewer) -> this.handleRenderIfTracked(target, viewer);
             case RenderTask.AttachTag a -> this.handleAttach(a);
             case RenderTask.ScheduleRender s -> this.handleScheduleRender(s);
             case RenderTask.RenderWhenCurrent r -> this.handleRenderWhenCurrent(r);
+            case RenderTask.StopTracking(var target, var viewer) -> this.handleStopTracking(target, viewer);
             case RenderTask.StopRendering(var target, var viewer) -> this.handleStop(target, viewer);
             case RenderTask.SuppressChange s -> this.handleSuppress(s);
             case RenderTask.TeamPacket t -> this.handleTeamPacket(t);
@@ -205,9 +207,24 @@ public final class RenderLoop {
 
     // ── Handlers ─────────────────────────────────────────────────────────────
 
+    private void handleRenderIfTracked(@NotNull Player target, @NotNull Player viewer) {
+        if (target == viewer) {
+            this.handleRender(target, viewer);
+            return;
+        }
+        final ViewerState state = this.states.get(key(target, viewer));
+        if (state == null || !state.tracked) return;
+        if (state.pendingSpawn != null) {
+            this.handleRenderWhenCurrent(state.pendingSpawn);
+            return;
+        }
+        this.handleRender(target, viewer);
+    }
+
     private void handleScheduleRender(@NotNull RenderTask.ScheduleRender spawn) {
         final ViewerState state = this.getOrCreate(spawn.target(), spawn.viewer());
         this.handleStop(spawn.target(), spawn.viewer());
+        state.tracked = true;
         final RenderTask.RenderWhenCurrent pending = new RenderTask.RenderWhenCurrent(
                 state, state.renderGeneration);
         state.pendingSpawn = pending;
@@ -217,6 +234,7 @@ public final class RenderLoop {
                 this.post(pending);
             }, 1L, TimeUnit.MILLISECONDS);
         } catch (RuntimeException ex) {
+            state.tracked = false;
             this.invalidateRender(state);
             throw ex;
         }
@@ -226,7 +244,7 @@ public final class RenderLoop {
         final ViewerState state = pending.state();
         if (this.states.get(key(state.target, state.viewer)) != state
                 || state.pendingSpawn != pending || !pending.ready().get()
-                || state.renderGeneration != pending.generation()) return;
+                || state.renderGeneration != pending.generation() || !state.tracked) return;
         state.pendingSpawn = null;
         this.handleRender(state.target, state.viewer);
     }
@@ -239,6 +257,13 @@ public final class RenderLoop {
                 || !state.active || !state.rendered || state.renderer != attachment.renderer()) return;
         state.pendingAttach = null;
         attachment.renderer().attachPassengers(state, attachment.tagEntityId(), attachment.channel());
+    }
+
+    private void handleStopTracking(@NotNull Player target, @NotNull Player viewer) {
+        final ViewerState state = this.states.get(key(target, viewer));
+        if (state == null) return;
+        state.tracked = false;
+        this.handleStop(target, viewer);
     }
 
     private void invalidateRender(@NotNull ViewerState state) {
@@ -698,6 +723,7 @@ public final class RenderLoop {
             // The entity tracker excludes the target itself; preserve permission-gated own tags.
             this.handleRender(target, target);
             for (final Player viewer : target.getTrackedPlayers()) {
+                this.getOrCreate(target, viewer).tracked = true;
                 this.handleRender(target, viewer);
             }
         }
