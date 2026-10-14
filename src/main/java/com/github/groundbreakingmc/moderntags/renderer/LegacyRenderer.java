@@ -106,7 +106,7 @@ public final class LegacyRenderer implements TagRenderer {
         final ImmutableList.Builder<Frame> builder = ImmutableList.builder();
         for (int i = 0; i < frameSections.size(); i++) {
             try {
-                builder.add(Frame.parse(frameSections.get(i)));
+                builder.add(Frame.parse(frameSections.get(i), tagTextResolver));
             } catch (final Exception ex) {
                 throw new RuntimeException(
                         "[ModernTags] LegacyRenderer: failed to parse frames[" + i + "]", ex);
@@ -318,8 +318,8 @@ public final class LegacyRenderer implements TagRenderer {
                         : WrapperPlayServerTeams.TeamMode.UPDATE,
                 new WrapperPlayServerTeams.ScoreBoardTeamInfo(
                         Component.text(data.teamName),
-                        this.tagTextResolver.resolve(state.target, state.viewer, frame.compiledPrefix()),
-                        this.tagTextResolver.resolve(state.target, state.viewer, frame.compiledSuffix()),
+                        this.tagTextResolver.resolve(state, frame.compiledPrefix()),
+                        this.tagTextResolver.resolve(state, frame.compiledSuffix()),
                         showTag ? WrapperPlayServerTeams.NameTagVisibility.ALWAYS
                                 : WrapperPlayServerTeams.NameTagVisibility.NEVER,
                         WrapperPlayServerTeams.CollisionRule.ALWAYS,
@@ -392,27 +392,27 @@ public final class LegacyRenderer implements TagRenderer {
 
     public static final class Frame {
 
-        private final Text compiledPrefix;
+        private final Text<ViewerState> compiledPrefix;
         private final NamedTextColor nameColor;
-        private final Text compiledSuffix;
+        private final Text<ViewerState> compiledSuffix;
 
-        private Frame(@NotNull Builder builder) {
-            this.compiledPrefix = Text.cacheableOf(builder.prefix);
+        private Frame(@NotNull Builder builder, @NotNull TagTextResolver textResolver) {
+            this.compiledPrefix = textResolver.compile(builder.prefix);
             this.nameColor = builder.nameColor;
-            this.compiledSuffix = Text.cacheableOf(builder.suffix);
+            this.compiledSuffix = textResolver.compile(builder.suffix);
         }
 
-        static Frame parse(@NotNull Config node) {
+        static Frame parse(@NotNull Config node, @NotNull TagTextResolver textResolver) {
             return new Builder()
                     .prefix(node.findStr("prefix"))
                     .nameColor(Objects.requireNonNullElse(
                             NamedTextColor.NAMES.value(node.findStr("name-color").toLowerCase()),
                             NamedTextColor.WHITE))
                     .suffix(node.findStr("suffix"))
-                    .build();
+                    .build(textResolver);
         }
 
-        public Text compiledPrefix() {
+        public Text<ViewerState> compiledPrefix() {
             return this.compiledPrefix;
         }
 
@@ -420,7 +420,7 @@ public final class LegacyRenderer implements TagRenderer {
             return this.nameColor;
         }
 
-        public Text compiledSuffix() {
+        public Text<ViewerState> compiledSuffix() {
             return this.compiledSuffix;
         }
 
@@ -445,8 +445,8 @@ public final class LegacyRenderer implements TagRenderer {
                 return this;
             }
 
-            public Frame build() {
-                return new Frame(this);
+            public Frame build(@NotNull TagTextResolver textResolver) {
+                return new Frame(this, textResolver);
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.github.groundbreakingmc.moderntags.text;
 
 import com.github.groundbreakingmc.gikymessage.Text;
+import com.github.groundbreakingmc.moderntags.core.ViewerState;
 import com.github.groundbreakingmc.moderntags.util.NumberUtils;
 import me.clip.placeholderapi.PlaceholderAPIPlugin;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
@@ -14,6 +15,7 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.function.BiFunction;
 import java.util.function.ToIntBiFunction;
 import java.util.logging.Logger;
 
@@ -21,15 +23,15 @@ import java.util.logging.Logger;
  * Resolves player-specific placeholders at render time.
  * <p>
  * Supports two-context syntax: <code>{owner:key}</code> resolves against the tag's target player,
- * <code>{viewer:key}</code> resolves against the observing player. Bare keys (no prefix) fall back
- * to the owner context for backward compatibility.
+ * <code>{viewer:key}</code> resolves against the observing player. Relational placeholders use
+ * {@code rel:identifier_params} with the viewer first and the owner second.
  * <p>
  * Built-in keys: {@code name}, {@code display_name}, {@code health}, {@code prefix}, {@code suffix}.
- * Any other key is forwarded to PlaceholderAPI, where the identifier is the part before the first
- * underscore and the remainder is passed as params.
+ * Other owner/viewer keys are forwarded to PlaceholderAPI, where the identifier is the part before
+ * the first underscore and the remainder is passed as params. Unprefixed keys remain literal.
  * <p>
- * Templates must be compiled once via {@link Text#cacheableOf(String)} at config load and then
- * passed to {@link #resolve(Player, Player, Text)} at every render tick.
+ * Templates are compiled once via {@link #compile(String)} at config load. Handlers are selected
+ * then; player values, Vault services and PAPI expansions are read at render time.
  */
 public final class TagTextResolver {
 
@@ -47,22 +49,28 @@ public final class TagTextResolver {
     }
 
     /**
-     * Renders a pre-compiled template with full two-player context.
-     *
-     * @param owner    tag target — fills {@code {owner:...}} placeholders
-     * @param viewer   observing player — fills {@code {viewer:...}} placeholders
-     * @param compiled template produced by {@link Text#cacheableOf(String)}
+     * Compiles a template with handlers bound to its unique placeholder keys.
+     * Keeps GikyMessage's last-result cache per template and physical thread.
      */
-    public Component resolve(@NotNull Player owner, @NotNull Player viewer, @NotNull Text compiled) {
-        return compiled.render(key -> this.dispatch(owner, viewer, key));
+    public @NotNull Text<ViewerState> compile(@NotNull String pattern) {
+        return Text.cacheableOf(pattern, key -> {
+            final BiFunction<Player, Player, Component> provider = this.bind(key);
+            return (state, value) -> value.component(provider.apply(state.target, state.viewer));
+        });
+    }
+
+    /**
+     * Renders with the existing pair state as context; the compiled text does not retain it.
+     */
+    public Component resolve(@NotNull ViewerState state, @NotNull Text<ViewerState> compiled) {
+        return compiled.render(state);
     }
 
     /**
      * Returns a lazy function that resolves {@code pattern} against the chosen player at call time
      * and parses the result as an integer.
      * <p>
-     * Pattern format: {@code owner:key} / {@code viewer:key}, or a bare PAPI key resolved against
-     * the owner.
+     * Pattern format: {@code owner:key}, {@code viewer:key}, or {@code rel:identifier_params}.
      *
      * @param pattern placeholder pattern string from config (e.g. {@code "owner:health"})
      * @return {@code ToIntBiFunction<target, viewer>}
@@ -70,8 +78,9 @@ public final class TagTextResolver {
     public @NotNull ToIntBiFunction<Player, Player> intFromPlaceholder(@NotNull String pattern) {
         if (pattern.isEmpty()) return (t, v) -> 0;
 
+        final BiFunction<Player, Player, Component> provider = this.bind(pattern);
         return (target, viewer) -> {
-            final Component component = this.dispatch(target, viewer, pattern);
+            final Component component = provider.apply(target, viewer);
             if (component == null) return 0;
             final String raw = PlainTextComponentSerializer.plainText().serialize(component).trim();
             try {
@@ -82,41 +91,46 @@ public final class TagTextResolver {
         };
     }
 
-    private @Nullable Component dispatch(@NotNull Player owner,
-                                         @NotNull Player viewer,
-                                         @NotNull String key) {
+    private @NotNull BiFunction<Player, Player, Component> bind(@NotNull String key) {
         return switch (key) {
-            case "owner:name" -> owner.name();
-            case "owner:display_name" -> owner.displayName();
-            case "owner:health" -> Component.text(NumberUtils.healthToStr(owner.getHealth()));
-            case "owner:prefix" -> this.vaultComponent(owner, true);
-            case "owner:suffix" -> this.vaultComponent(owner, false);
+            case "owner:name" -> (owner, viewer) -> owner.name();
+            case "owner:display_name" -> (owner, viewer) -> owner.displayName();
+            case "owner:health" -> (owner, viewer) -> Component.text(NumberUtils.healthToStr(owner.getHealth()));
+            case "owner:prefix" -> (owner, viewer) -> this.vaultComponent(owner, true);
+            case "owner:suffix" -> (owner, viewer) -> this.vaultComponent(owner, false);
 
-            case "viewer:name" -> viewer.name();
-            case "viewer:display_name" -> viewer.displayName();
-            case "viewer:health" -> Component.text(NumberUtils.healthToStr(viewer.getHealth()));
-            case "viewer:prefix" -> this.vaultComponent(viewer, true);
-            case "viewer:suffix" -> this.vaultComponent(viewer, false);
+            case "viewer:name" -> (owner, viewer) -> viewer.name();
+            case "viewer:display_name" -> (owner, viewer) -> viewer.displayName();
+            case "viewer:health" -> (owner, viewer) -> Component.text(NumberUtils.healthToStr(viewer.getHealth()));
+            case "viewer:prefix" -> (owner, viewer) -> this.vaultComponent(viewer, true);
+            case "viewer:suffix" -> (owner, viewer) -> this.vaultComponent(viewer, false);
 
             default -> {
                 if (key.startsWith("owner:")) {
-                    yield this.papiComponent(owner, key.substring(6));
+                    yield this.bindPapi(key.substring(6), false);
                 }
 
                 if (key.startsWith("viewer:")) {
-                    yield this.papiComponent(viewer, key.substring(7));
+                    yield this.bindPapi(key.substring(7), true);
                 }
 
                 if (key.startsWith("rel:")) {
-                    yield this.relationalComponent(viewer, owner, key.substring(4));
+                    final String relationalKey = key.substring(4);
+                    final int sep = relationalKey.indexOf('_');
+                    if (sep == -1) yield (owner, viewer) -> null;
+                    final String identifier = relationalKey.substring(0, sep);
+                    final String params = relationalKey.substring(sep + 1);
+                    yield (owner, viewer) -> this.relationalComponent(viewer, owner, identifier, params);
                 }
 
-                this.logger.warning(
-                        "Unknown placeholder '" + key + "'. " +
-                                "If this is intended to be plain text and not a placeholder, " +
-                                "escape it using '\\'."
-                );
-                yield Component.text('{' + key + '}');
+                yield (owner, viewer) -> {
+                    this.logger.warning(
+                            "Unknown placeholder '" + key + "'. " +
+                                    "If this is intended to be plain text and not a placeholder, " +
+                                    "escape it using '\\'."
+                    );
+                    return Component.text('{' + key + '}');
+                };
             }
         };
     }
@@ -139,18 +153,23 @@ public final class TagTextResolver {
 
     // ── PlaceholderAPI ────────────────────────────────────────────────────────
 
-    private @Nullable Component papiComponent(@NotNull Player player, @NotNull String key) {
-        if (!this.supportsPapi) return null;
-
+    private @NotNull BiFunction<Player, Player, Component> bindPapi(@NotNull String key, boolean viewerContext) {
         final int sep = key.indexOf('_');
         final String identifier = sep != -1 ? key.substring(0, sep) : key;
+        final String params = sep != -1 ? key.substring(sep + 1) : "";
+        return (owner, viewer) -> this.papiComponent(viewerContext ? viewer : owner, identifier, params);
+    }
+
+    private @Nullable Component papiComponent(@NotNull Player player, @NotNull String identifier,
+                                              @NotNull String params) {
+        if (!this.supportsPapi) return null;
+
         final PlaceholderExpansion expansion = PlaceholderAPIPlugin.getInstance()
                 .getLocalExpansionManager()
                 .getExpansion(identifier);
 
         if (expansion == null) return null;
 
-        final String params = sep != -1 ? key.substring(sep + 1) : "";
         final String result = expansion.onRequest(player, params);
         return result != null ? Component.text(result) : null;
     }
@@ -158,21 +177,19 @@ public final class TagTextResolver {
     private @Nullable Component relationalComponent(
             @NotNull Player viewer,
             @NotNull Player owner,
-            @NotNull String key
+            @NotNull String identifier,
+            @NotNull String params
     ) {
         if (!this.supportsPapi) return null;
 
-        final int sep = key.indexOf('_');
-        if (sep == -1) return null;
-
         final PlaceholderExpansion expansion = PlaceholderAPIPlugin.getInstance()
                 .getLocalExpansionManager()
-                .getExpansion(key.substring(0, sep));
+                .getExpansion(identifier);
 
         if (!(expansion instanceof Relational relational)) return null;
 
         final String result = relational.onPlaceholderRequest(
-                viewer, owner, key.substring(sep + 1)
+                viewer, owner, params
         );
         return result != null ? Component.text(result) : null;
     }

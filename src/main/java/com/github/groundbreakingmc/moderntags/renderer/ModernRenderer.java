@@ -3,6 +3,7 @@ package com.github.groundbreakingmc.moderntags.renderer;
 import com.github.groundbreakingmc.gikymessage.Text;
 import com.github.groundbreakingmc.moderntags.ModernTags;
 import com.github.groundbreakingmc.moderntags.core.ViewerState;
+import com.github.groundbreakingmc.moderntags.text.TagTextResolver;
 import com.github.groundbreakingmc.mylib.config.Config;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.manager.protocol.ProtocolManager;
@@ -72,7 +73,7 @@ public final class ModernRenderer implements TagRenderer {
         final int placeholdersUpdateRate = config.findInt("placeholders-update-rate");
 
         final List<Frame> frames = config.findSectionList("frames").stream()
-                .map(ModernRenderer::parseFrame)
+                .map(frame -> parseFrame(frame, plugin.tagTextResolver()))
                 .collect(ImmutableList.toImmutableList());
 
         if (frames.isEmpty()) {
@@ -230,7 +231,7 @@ public final class ModernRenderer implements TagRenderer {
         metadata.addAll(frame.entityData());
         metadata.add(new EntityData<>(
                 TEXT_COMPONENT_INDEX, EntityDataTypes.ADV_COMPONENT,
-                this.plugin.tagTextResolver().resolve(state.target, state.viewer, frame.text())
+                this.plugin.tagTextResolver().resolve(state, frame.text())
         ));
         metadata.add(new EntityData<>(
                 TEXT_OPACITY_INDEX, EntityDataTypes.BYTE,
@@ -275,16 +276,16 @@ public final class ModernRenderer implements TagRenderer {
 
     public static final class Frame {
 
-        private final Text text;
+        private final Text<ViewerState> text;
         private final byte defaultOpacity;
         private final List<EntityData<?>> dataWithDefaultOpacity;
         private final byte sneakOpacity;
         private final List<EntityData<?>> dataWithSneakOpacity;
         private final List<EntityData<?>> entityData;
 
-        Frame(@NotNull String text, byte defaultTextOpacity, byte sneakTextOpacity,
+        Frame(@NotNull Text<ViewerState> text, byte defaultTextOpacity, byte sneakTextOpacity,
               @NotNull List<EntityData<?>> entityData) {
-            this.text = Text.cacheableOf(text);
+            this.text = text;
             this.defaultOpacity = defaultTextOpacity;
             this.dataWithDefaultOpacity = List.of(new EntityData<>(26, EntityDataTypes.BYTE, defaultTextOpacity));
             this.sneakOpacity = sneakTextOpacity;
@@ -292,7 +293,7 @@ public final class ModernRenderer implements TagRenderer {
             this.entityData = ImmutableList.copyOf(entityData);
         }
 
-        public Text text() {
+        public Text<ViewerState> text() {
             return this.text;
         }
 
@@ -426,7 +427,7 @@ public final class ModernRenderer implements TagRenderer {
                 return this;
             }
 
-            public Frame build() {
+            public Frame build(@NotNull TagTextResolver textResolver) {
                 final List<EntityData<?>> entityData = new ArrayList<>();
                 entityData.add(new EntityData<>(11, EntityDataTypes.VECTOR3F, new Vector3f(this.xOffset, this.yOffset, this.zOffset)));
                 entityData.add(new EntityData<>(12, EntityDataTypes.VECTOR3F, new Vector3f(this.scale, this.scale, this.scale)));
@@ -447,7 +448,7 @@ public final class ModernRenderer implements TagRenderer {
                 flags |= (byte) (alignmentToBits(this.alignment) << 3);
                 entityData.add(new EntityData<>(27, EntityDataTypes.BYTE, flags));
 
-                return new Frame(this.text, this.textOpacity, this.sneakTextOpacity, entityData);
+                return new Frame(textResolver.compile(this.text), this.textOpacity, this.sneakTextOpacity, entityData);
             }
 
             private static int alignmentToBits(TextDisplay.TextAlignment a) {
@@ -460,7 +461,7 @@ public final class ModernRenderer implements TagRenderer {
         }
     }
 
-    private static Frame parseFrame(@NotNull Config config) {
+    private static Frame parseFrame(@NotNull Config config, @NotNull TagTextResolver textResolver) {
         final Frame.Builder b = Frame.builder();
 
         b.text(config.findStr("text"));
@@ -491,6 +492,6 @@ public final class ModernRenderer implements TagRenderer {
                 : (int) Long.parseLong(hex, 16);
         b.backgroundColor(Color.fromARGB(argb));
 
-        return b.build();
+        return b.build(textResolver);
     }
 }
