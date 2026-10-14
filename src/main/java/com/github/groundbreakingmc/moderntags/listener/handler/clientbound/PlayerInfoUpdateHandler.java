@@ -13,6 +13,7 @@ import org.jetbrains.annotations.NotNull;
 /**
  * Renders or stops rendering a player's tag on PLAYER_INFO_UPDATE.
  * ADD_PLAYER triggers a render; switching to spectator stops it; switching back re-renders.
+ * Spectator game-mode updates take precedence when both actions are present.
  */
 public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
 
@@ -28,24 +29,18 @@ public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
         if (packet.getEntries().isEmpty()) return;
 
         final var actions = packet.getActions();
+        final boolean addPlayer = actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER);
+        final boolean updateGameMode = actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE);
+        if (!addPlayer && !updateGameMode) return;
 
-        if (actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER)) {
-            final Player viewer = event.getPlayer();
-            for (final var entry : packet.getEntries()) {
-                final Player target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
-                if (target == null) continue;
+        final Player viewer = event.getPlayer();
+        for (final var entry : packet.getEntries()) {
+            final Player target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
+            if (target == null) continue;
+            if (updateGameMode && entry.getGameMode() == GameMode.SPECTATOR) {
+                this.renderLoop.post(new RenderTask.StopRendering(target, viewer));
+            } else {
                 this.renderLoop.post(new RenderTask.Render(target, viewer));
-            }
-        } else if (actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE)) {
-            final Player viewer = event.getPlayer();
-            for (final var entry : packet.getEntries()) {
-                final Player target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
-                if (target == null) continue;
-                if (entry.getGameMode() == GameMode.SPECTATOR) {
-                    this.renderLoop.post(new RenderTask.StopRendering(target, viewer));
-                } else {
-                    this.renderLoop.post(new RenderTask.Render(target, viewer));
-                }
             }
         }
     }
