@@ -146,9 +146,11 @@ public sealed interface RenderTask permits
     record InitializeAll() implements RenderTask {}
 
     /**
-     * Stop rendering all pairs and release all state. Posted on disable/reload start.
+     * Stops rendering all pairs. Reload retains client teams so vanilla names stay hidden.
+     *
+     * @param shutdown whether to remove fallback teams and release the team registry on disable
      */
-    record InvalidateAll() implements RenderTask {}
+    record InvalidateAll(boolean shutdown) implements RenderTask {}
 
     // ── Periodic tick ─────────────────────────────────────────────────────────
 

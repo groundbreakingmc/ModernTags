@@ -83,7 +83,7 @@ public final class ModernTags extends JavaPlugin {
         if (this.updateManager != null) this.updateManager.stop();
 
         if (this.renderLoop != null) {
-            this.renderLoop.post(new RenderTask.InvalidateAll());
+            this.renderLoop.post(new RenderTask.InvalidateAll(true));
         }
 
         if (this.packetListener != null) {
@@ -111,7 +111,7 @@ public final class ModernTags extends JavaPlugin {
      */
     public CompletableFuture<Void> reload() {
         return CompletableFuture.runAsync(() -> {
-            this.renderLoop.post(new RenderTask.InvalidateAll());
+            this.renderLoop.post(new RenderTask.InvalidateAll(false));
             this.updateManager.stop();
 
             this.loadConfiguration();
