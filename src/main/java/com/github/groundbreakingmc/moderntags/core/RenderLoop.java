@@ -218,7 +218,7 @@ public final class RenderLoop {
     private void handleGameModeUpdate(@NotNull Player target, @NotNull Player viewer) {
         final ViewerState state = this.states.get(key(target, viewer));
         if (state != null) {
-            // Mode changes must also refresh invisibility for clients without metadata handling.
+            // A game-mode change can also change the target's native invisibility.
             if (target.isInvisible()) state.addSuppress(ViewerState.SUPPRESS_INVISIBLE);
             else state.removeSuppress(ViewerState.SUPPRESS_INVISIBLE);
         }
@@ -370,7 +370,7 @@ public final class RenderLoop {
      *   <li>any other non-zero mask → hide</li>
      * </ul>
      * Spectator targets are visible only to spectators, who ignore spectator invisibility.
-     * Ordinary invisible targets remain hidden for every viewer.
+     * Legacy nametags use Minecraft's native invisibility handling.
      */
     private void applyCurrentState(@NotNull ViewerState state) {
         if (state.renderer == null) return;
@@ -378,7 +378,7 @@ public final class RenderLoop {
         final boolean spectatorTarget = state.target.getGameMode() == GameMode.SPECTATOR;
         final boolean spectatorViewer = state.viewer.getGameMode() == GameMode.SPECTATOR;
         int suppressMask = state.suppressMask;
-        if (spectatorTarget && spectatorViewer) {
+        if (state.renderer instanceof LegacyRenderer || spectatorTarget && spectatorViewer) {
             suppressMask &= ~ViewerState.SUPPRESS_INVISIBLE;
         }
         final boolean fullyHidden = spectatorTarget && !spectatorViewer

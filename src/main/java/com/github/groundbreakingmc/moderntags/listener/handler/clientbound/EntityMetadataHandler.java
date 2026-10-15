@@ -15,8 +15,8 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Tracks invisibility and sneak state from ENTITY_METADATA packets.
- * Only relevant on 1.19.4+ — older clients handle metadata themselves without sending this data.
+ * Synchronizes modern tag visibility and sneak opacity with owner metadata.
+ * Legacy clients handle native nametags without this synchronization.
  */
 public final class EntityMetadataHandler implements ClientBoundPacketHandler {
 
@@ -25,13 +25,23 @@ public final class EntityMetadataHandler implements ClientBoundPacketHandler {
 
     private final RenderLoop renderLoop;
 
+    /**
+     * Creates a handler that forwards visibility changes to the render loop.
+     *
+     * @param renderLoop the owner of tracked tag state
+     */
     public EntityMetadataHandler(@NotNull RenderLoop renderLoop) {
         this.renderLoop = renderLoop;
     }
 
+    /**
+     * Tracks invisibility and crouching for TextDisplay tags on clients 1.19.4 and newer.
+     * Older clients use native nametags, so Minecraft handles these states itself.
+     *
+     * @param event the outgoing entity-metadata packet
+     */
     @Override
     public void handle(@NotNull PacketSendEvent event) {
-        // Pre-1.19.4 clients process metadata themselves; the packet lacks the needed fields.
         if (event.getUser().getClientVersion().isOlderThan(ClientVersion.V_1_19_4)) return;
 
         final var packet = new WrapperPlayServerEntityMetadata(event);
