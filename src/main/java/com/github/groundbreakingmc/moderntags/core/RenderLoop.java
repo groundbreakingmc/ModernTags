@@ -369,7 +369,7 @@ public final class RenderLoop {
      *   <li>mask == SUPPRESS_SNEAK  → show with sneak opacity (ModernRenderer only)</li>
      *   <li>any other non-zero mask → hide</li>
      * </ul>
-     * Spectator targets are visible only to spectators, who ignore spectator invisibility.
+     * Spectator targets are visible only to spectators, who ignore invisibility.
      * Legacy nametags use Minecraft's native invisibility handling.
      */
     private void applyCurrentState(@NotNull ViewerState state) {
@@ -378,7 +378,7 @@ public final class RenderLoop {
         final boolean spectatorTarget = state.target.getGameMode() == GameMode.SPECTATOR;
         final boolean spectatorViewer = state.viewer.getGameMode() == GameMode.SPECTATOR;
         int suppressMask = state.suppressMask;
-        if (state.renderer instanceof LegacyRenderer || spectatorTarget && spectatorViewer) {
+        if (state.renderer instanceof LegacyRenderer || spectatorViewer) {
             suppressMask &= ~ViewerState.SUPPRESS_INVISIBLE;
         }
         final boolean fullyHidden = spectatorTarget && !spectatorViewer
