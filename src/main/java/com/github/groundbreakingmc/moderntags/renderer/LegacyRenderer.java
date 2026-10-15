@@ -277,6 +277,7 @@ public final class LegacyRenderer implements TagRenderer {
     private void broadcastFullUpdate(@NotNull Player target, @NotNull TargetData data) {
         final Frame frame = this.frames.get(data.currentFrame);
         for (final ViewerState viewerState : data.viewers.values()) {
+            if (!viewerState.rendered) continue;
             final Object channel = this.protocolManager.getChannel(viewerState.viewer.getUniqueId());
             if (channel == null) continue;
             this.protocolManager.sendPacketSilently(channel,
