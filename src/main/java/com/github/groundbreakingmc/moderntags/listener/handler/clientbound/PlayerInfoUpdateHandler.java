@@ -4,25 +4,33 @@ import com.github.groundbreakingmc.moderntags.core.RenderLoop;
 import com.github.groundbreakingmc.moderntags.core.RenderTask;
 import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
-import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Renders or stops rendering a player's tag on PLAYER_INFO_UPDATE.
- * ADD_PLAYER and game-mode changes refresh tracked pairs; spectator stops rendering.
- * Spectator game-mode updates take precedence when both actions are present.
+ * Refreshes tracked tags on PLAYER_INFO_UPDATE.
+ * Game-mode updates also refresh invisibility and the viewer's spectator visibility.
  */
 public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
 
     private final RenderLoop renderLoop;
 
-    public PlayerInfoUpdateHandler(RenderLoop renderLoop) {
+    /**
+     * Creates a handler that forwards player-info changes to the render loop.
+     *
+     * @param renderLoop the owner of tracked tag state
+     */
+    public PlayerInfoUpdateHandler(@NotNull RenderLoop renderLoop) {
         this.renderLoop = renderLoop;
     }
 
+    /**
+     * Refreshes tracked tags for player additions and game-mode changes.
+     *
+     * @param event the outgoing player-info update
+     */
     @Override
     public void handle(@NotNull PacketSendEvent event) {
         final var packet = new WrapperPlayServerPlayerInfoUpdate(event);
@@ -37,8 +45,8 @@ public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
         for (final var entry : packet.getEntries()) {
             final Player target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
             if (target == null) continue;
-            if (updateGameMode && entry.getGameMode() == GameMode.SPECTATOR) {
-                this.renderLoop.post(new RenderTask.StopRendering(target, viewer));
+            if (updateGameMode) {
+                this.renderLoop.post(new RenderTask.GameModeUpdate(target, viewer));
             } else {
                 this.renderLoop.post(new RenderTask.RenderIfTracked(target, viewer));
             }

@@ -16,6 +16,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
 import org.jctools.queues.MpscArrayQueue;
 import org.jetbrains.annotations.NotNull;
@@ -196,6 +197,7 @@ public final class RenderLoop {
         switch (task) {
             case RenderTask.Render(var target, var viewer) -> this.handleRender(target, viewer);
             case RenderTask.RenderIfTracked(var target, var viewer) -> this.handleRenderIfTracked(target, viewer);
+            case RenderTask.GameModeUpdate(var target, var viewer) -> this.handleGameModeUpdate(target, viewer);
             case RenderTask.AttachTag a -> this.handleAttach(a);
             case RenderTask.ScheduleRender s -> this.handleScheduleRender(s);
             case RenderTask.RenderWhenCurrent r -> this.handleRenderWhenCurrent(r);
@@ -212,6 +214,26 @@ public final class RenderLoop {
     }
 
     // ── Handlers ─────────────────────────────────────────────────────────────
+
+    private void handleGameModeUpdate(@NotNull Player target, @NotNull Player viewer) {
+        final ViewerState state = this.states.get(key(target, viewer));
+        if (state != null) {
+            // Mode changes must also refresh invisibility for clients without metadata handling.
+            if (target.isInvisible()) state.addSuppress(ViewerState.SUPPRESS_INVISIBLE);
+            else state.removeSuppress(ViewerState.SUPPRESS_INVISIBLE);
+        }
+        this.handleRenderIfTracked(target, viewer);
+
+        if (target != viewer) return;
+        final LongArrayList viewerKeys = this.viewerIndex.get(viewer.getEntityId());
+        if (viewerKeys == null) return;
+        for (int i = 0; i < viewerKeys.size(); i++) {
+            final ViewerState viewed = this.states.get(viewerKeys.getLong(i));
+            if (viewed != null && viewed.active && viewed.target != viewer) {
+                this.applyCurrentState(viewed);
+            }
+        }
+    }
 
     private void handleRenderIfTracked(@NotNull Player target, @NotNull Player viewer) {
         if (target == viewer) {
@@ -341,17 +363,26 @@ public final class RenderLoop {
     }
 
     /**
-     * Applies the visual state dictated by {@code suppressMask}:
+     * Applies viewer visibility and the effective suppression mask:
      * <ul>
      *   <li>mask == 0               → show at full opacity</li>
      *   <li>mask == SUPPRESS_SNEAK  → show with sneak opacity (ModernRenderer only)</li>
      *   <li>any other non-zero mask → hide</li>
      * </ul>
+     * Spectator targets are visible only to spectators, who ignore spectator invisibility.
+     * Ordinary invisible targets remain hidden for every viewer.
      */
     private void applyCurrentState(@NotNull ViewerState state) {
         if (state.renderer == null) return;
 
-        final boolean fullyHidden = (state.suppressMask & ~ViewerState.SUPPRESS_SNEAK) != 0;
+        final boolean spectatorTarget = state.target.getGameMode() == GameMode.SPECTATOR;
+        final boolean spectatorViewer = state.viewer.getGameMode() == GameMode.SPECTATOR;
+        int suppressMask = state.suppressMask;
+        if (spectatorTarget && spectatorViewer) {
+            suppressMask &= ~ViewerState.SUPPRESS_INVISIBLE;
+        }
+        final boolean fullyHidden = spectatorTarget && !spectatorViewer
+                || (suppressMask & ~ViewerState.SUPPRESS_SNEAK) != 0;
 
         if (fullyHidden) {
             if (state.rendered) {
@@ -378,7 +409,7 @@ public final class RenderLoop {
         }
 
         if (state.renderer instanceof ModernRenderer modern) {
-            if (state.isSneakOnly()) {
+            if (suppressMask == ViewerState.SUPPRESS_SNEAK) {
                 modern.applySneakOpacity(state);
             } else {
                 modern.removeSneakOpacity(state);

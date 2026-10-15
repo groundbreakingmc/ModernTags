@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public sealed interface RenderTask permits
         RenderTask.AttachTag,
         RenderTask.Cleanup,
+        RenderTask.GameModeUpdate,
         RenderTask.InitializeAll,
         RenderTask.InvalidateAll,
         RenderTask.PassengersUpdate,
@@ -46,6 +47,15 @@ public sealed interface RenderTask permits
 
     /** Refreshes an existing tracked pair; tab-list membership alone does not establish tracking. */
     record RenderIfTracked(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
+
+    /**
+     * Refreshes tracked tag visibility after a player's game mode changes.
+     * A viewer's own update also refreshes the active tags they can see.
+     *
+     * @param target the player whose game mode changed
+     * @param viewer the recipient of the game-mode update
+     */
+    record GameModeUpdate(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
 
     /** Registers a native player spawn before scheduling its delayed tag render. */
     record ScheduleRender(@NotNull Player target, @NotNull Player viewer,
