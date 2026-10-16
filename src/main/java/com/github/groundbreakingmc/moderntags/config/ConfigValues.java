@@ -41,6 +41,8 @@ public final class ConfigValues {
     private Function<Config, ModernRenderer> modernFactory;
     private Function<Config, LegacyRenderer> legacyFactory;
 
+    private volatile boolean checkForUpdates;
+    private volatile boolean autoDownloadUpdates;
     private boolean useMinimessageColorizer;
     private boolean hideTagWhenHasPassenger;
     private int tickRate;
@@ -77,6 +79,25 @@ public final class ConfigValues {
         this.loadNameTags(root);
     }
 
+    /**
+     * Returns whether to check for updates when the plugin starts.
+     *
+     * @return whether startup update checks are enabled
+     */
+    public boolean checkForUpdates() {
+        return this.checkForUpdates;
+    }
+
+    /**
+     * Returns whether available updates should be downloaded automatically.
+     * Downloaded updates are installed when the server restarts.
+     *
+     * @return whether automatic downloads are enabled
+     */
+    public boolean autoDownloadUpdates() {
+        return this.autoDownloadUpdates;
+    }
+
     public boolean useMinimessageColorizer() {
         return this.useMinimessageColorizer;
     }
@@ -108,6 +129,8 @@ public final class ConfigValues {
     // ── Settings ──────────────────────────────────────────────────────────────
 
     private void loadSettings(Config root) {
+        this.checkForUpdates = root.boolOr("updates.check", true);
+        this.autoDownloadUpdates = root.boolOr("updates.auto-download", false);
         this.useMinimessageColorizer = root.findBool("vault-mm-formatting");
         this.hideTagWhenHasPassenger = root.findBool("hide-tag-when-has-passenger");
         this.tickRate = root.findInt("tick-rate");

@@ -1,6 +1,6 @@
 package com.github.groundbreakingmc.moderntags;
 
-import com.github.groundbreakingmc.moderntags.command.ReloadCommand;
+import com.github.groundbreakingmc.moderntags.command.ModernTagsCommand;
 import com.github.groundbreakingmc.moderntags.config.ConfigValues;
 import com.github.groundbreakingmc.moderntags.core.RenderLoop;
 import com.github.groundbreakingmc.moderntags.core.RenderTask;
@@ -11,6 +11,7 @@ import com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer;
 import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
 import com.github.groundbreakingmc.moderntags.text.TagTextResolver;
 import com.github.groundbreakingmc.moderntags.update.UpdateManager;
+import com.github.groundbreakingmc.mylib.updateschecker.UpdatesChecker;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerCommon;
 import net.milkbowl.vault.chat.Chat;
@@ -66,7 +67,10 @@ public final class ModernTags extends JavaPlugin {
 
         super.getServer().getPluginManager().registerEvents(new BukkitListener(this.renderLoop), this);
 
-        this.getCommand("moderntags").setExecutor(new ReloadCommand(this));
+        final UpdatesChecker updatesChecker = new UpdatesChecker(this,
+                "https://raw.githubusercontent.com/groundbreakingmc/ModernTags/main/update.txt",
+                !this.configValues.autoDownloadUpdates() ? "/moderntags update" : "");
+        this.getCommand("moderntags").setExecutor(new ModernTagsCommand(this, updatesChecker));
 
         // Initialize all (target, viewer) pairs — RenderLoop drain handles threading.
         Bukkit.getAsyncScheduler().runNow(this, task ->
@@ -80,6 +84,9 @@ public final class ModernTags extends JavaPlugin {
         });
 
         this.metrics = new Metrics(this, 34701);
+        if (this.configValues.checkForUpdates()) {
+            updatesChecker.check(this.configValues.autoDownloadUpdates());
+        }
     }
 
     @Override

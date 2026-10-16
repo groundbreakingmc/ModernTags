@@ -1,3 +1,18 @@
+updates:
+  # Check for updates at startup.
+  # ──
+  # Проверять обновления при запуске.
+  check: true
+
+  # With checks enabled, download updates to the server's update folder.
+  # If false, update may be installed with "/moderntags update" command.
+  # To apply changes server must be restarted.
+  # ──
+  # При включённой проверке скачивать обновления в папку обновлений сервера.
+  # При false, обновление можно установить через команду "/moderntags update".
+  # Чтобы применить изменения, нужно перезапустить сервер.
+  auto-download: false
+
 # Parse Vault prefix/suffix placeholders using MiniMessage format.
 # If false, treated as legacy (&-formatted) strings.
 # ──

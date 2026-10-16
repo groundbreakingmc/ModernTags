@@ -13,12 +13,11 @@ libraries: [ "org.spongepowered:configurate-yaml:4.2.0" ]
 
 commands:
   moderntags:
-    description: "ModernTags reload command"
-    permission: moderntags.reload
+    description: "Reload ModernTags or download an update"
 
 permissions:
-  moderntags.reload:
-    description: "Allows to reload the plugin"
+  moderntags.admin:
+    description: "Allows to reload plugin or download its updates"
     default: op
 
   moderntags.see.own:
