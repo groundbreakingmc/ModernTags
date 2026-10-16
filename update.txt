@@ -1,0 +1,4 @@
+2.2.0->https://github.com/groundbreakingmc/ModernTags/releases/download/v2.2.0/ModernTags-2.2.0.jar
+Added update checks, downloads and bStats metrics.
+Modern tags on invisible players are now visible to spectator viewers (GM3), just like vanilla names.
+Fixed spectator and legacy tag visibility, and default name flashes on reload or death.
