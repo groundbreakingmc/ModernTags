@@ -29,14 +29,30 @@
 
 | Command | Description |
 |---|---|
+| `/moderntags` | Reload plugin configuration |
 | `/moderntags reload` | Reload plugin configuration |
+| `/moderntags update` | Check for an update and download it for installation on restart |
 
 ### Permissions
 
 | Permission | Description |
 |---|---|
 | `moderntags.see.own` | See your own tag |
-| `moderntags.reload` | Access to the reload command |
+| `moderntags.admin` | Reload configuration and download updates (operators by default) |
+
+## Updates
+
+`updates.check` enables update checks at startup. When both `updates.check` and `updates.auto-download` are enabled,
+an available update is downloaded to the server's update folder and installed on the next server restart.
+
+`/moderntags update` checks again and downloads an available update, even when startup checks or automatic downloads
+are disabled. When `updates.auto-download` is `true`, `update` is hidden from tab completion but remains available
+by typing the command. Configuration reloads apply these settings without starting another automatic check.
+
+## Metrics
+
+ModernTags uses [bStats](https://bstats.org) for standard server and plugin statistics. To disable collection,
+set `enabled: false` in the shared `plugins/bStats/config.yml` file.
 
 ## Placeholders
 
@@ -71,6 +87,11 @@ Any PAPI expansion is supported via `{owner:EXPANSION_PLACEHOLDER}` or `{viewer:
 ### `config.yml`
 
 ```yaml
+# Check for updates at startup and optionally download them for installation on restart.
+updates:
+  check: true
+  auto-download: false
+
 # Whether to parse Vault prefix/suffix placeholders using MiniMessage.
 # If false, they are treated as legacy (&-formatted) strings.
 vault-mm-formatting: false
