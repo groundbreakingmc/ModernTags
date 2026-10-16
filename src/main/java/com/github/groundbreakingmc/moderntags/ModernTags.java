@@ -14,6 +14,7 @@ import com.github.groundbreakingmc.moderntags.update.UpdateManager;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerCommon;
 import net.milkbowl.vault.chat.Chat;
+import org.bstats.bukkit.Metrics;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -29,6 +30,7 @@ public final class ModernTags extends JavaPlugin {
     private UpdateManager updateManager;
     private PacketListenerCommon packetListener;
     private LuckPermsListener luckPermsListener;
+    private Metrics metrics;
 
     @Override
     public void onEnable() {
@@ -76,10 +78,14 @@ public final class ModernTags extends JavaPlugin {
                     getServer().getServicesManager().getRegistration(Chat.class);
             if (reg != null) this.tagTextResolver.chat(reg.getProvider());
         });
+
+        this.metrics = new Metrics(this, 34701);
     }
 
     @Override
     public void onDisable() {
+        if (this.metrics != null) this.metrics.shutdown();
+
         if (this.updateManager != null) this.updateManager.stop();
 
         if (this.renderLoop != null) {

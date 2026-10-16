@@ -39,6 +39,9 @@ dependencies {
 
     // Source: https://github.com/JCTools/JCTools
     implementation(libs.jstools)
+
+    // Source: https://github.com/Bastian/bstats-metrics
+    implementation(libs.bstats.bukkit)
 }
 
 java.toolchain {
@@ -66,6 +69,8 @@ tasks {
             "org.jctools",
             "com.github.groundbreakingmc.moderntags.libs.jctools"
         )
+
+        relocate("org.bstats", "com.github.groundbreakingmc.moderntags.libs.bstats")
 
         minimize()
     }

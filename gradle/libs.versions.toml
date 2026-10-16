@@ -9,6 +9,7 @@ placeholderapi = "2.11.7"
 vaultapi = "1.7"
 luckperms-api = "5.4"
 jstools = "4.0.3"
+bstats = "3.2.1"
 
 [libraries]
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
@@ -19,6 +20,7 @@ placeholderapi = { module = "me.clip:placeholderapi", version.ref = "placeholder
 vaultapi = { module = "com.github.MilkBowl:VaultAPI", version.ref = "vaultapi" }
 luckperms-api = { module = "net.luckperms:api", version.ref = "luckperms-api" }
 jstools = { module = "org.jctools:jctools-core", version.ref = "jstools" }
+bstats-bukkit = { module = "org.bstats:bstats-bukkit", version.ref = "bstats" }
 
 [plugins]
 shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
