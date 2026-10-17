@@ -358,7 +358,7 @@ public final class LegacyRenderer implements TagRenderer {
                         this.resolveNameColor(state, frame.nameColor()),
                         WrapperPlayServerTeams.OptionData.NONE
                 ),
-                List.of(state.target.getName())
+                create ? List.of(state.target.getName()) : List.of()
         );
     }
 
