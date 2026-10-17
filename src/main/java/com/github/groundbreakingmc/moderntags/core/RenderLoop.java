@@ -23,8 +23,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -667,7 +667,7 @@ public final class RenderLoop {
                 if (info == null) return;
                 final boolean create = team == null;
                 this.sendTeam(channel, name, create
-                        ? WrapperPlayServerTeams.TeamMode.CREATE : WrapperPlayServerTeams.TeamMode.UPDATE,
+                                ? WrapperPlayServerTeams.TeamMode.CREATE : WrapperPlayServerTeams.TeamMode.UPDATE,
                         info, create ? players : List.of());
                 if (view == null) {
                     view = new ClientTeamView();
@@ -792,12 +792,14 @@ public final class RenderLoop {
     }
 
     private static final class ClientTeamView {
+
         private final Map<String, ClientTeam> teams = new HashMap<>();
         private final Map<String, ClientTeam> memberships = new HashMap<>();
         private @Nullable String hiddenTeamName;
     }
 
     private static final class ClientTeam {
+
         private WrapperPlayServerTeams.ScoreBoardTeamInfo info;
         private final Set<String> members = new HashSet<>();
 
@@ -919,7 +921,7 @@ public final class RenderLoop {
 
     private void handleInvalidateAll(boolean shutdown) {
         for (final ViewerState state : this.states.values()) {
-            if (state.rendered && state.renderer != null) {
+            if (state.renderer != null && this.needsTeardown(state)) {
                 state.renderer.stopRendering(state);
                 state.rendered = false;
             }
@@ -941,6 +943,12 @@ public final class RenderLoop {
             this.clientTeams.clear();
             this.teamRegistry.clear();
         }
+    }
+
+    private boolean needsTeardown(ViewerState state) {
+        return state.renderer instanceof LegacyRenderer legacy
+                ? legacy.hasRegisteredTeam(state)
+                : state.rendered;
     }
 
     private void recheckConditions() {
@@ -981,7 +989,7 @@ public final class RenderLoop {
                 }
                 if (!state.rendered || state.renderer == null) continue;
                 if (!this.tickSeen.computeIfAbsent(state.renderer,
-                        renderer -> Collections.newSetFromMap(new IdentityHashMap<>()))
+                                renderer -> Collections.newSetFromMap(new IdentityHashMap<>()))
                         .add(state.target)) continue;
 
                 final int frameRate = state.renderer.frameUpdateRate();

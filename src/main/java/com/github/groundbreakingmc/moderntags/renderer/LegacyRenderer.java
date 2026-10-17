@@ -151,6 +151,17 @@ public final class LegacyRenderer implements TagRenderer {
     }
 
     /**
+     * Checks whether this exact state has a registered team, including hidden tags.
+     *
+     * @param state the target and viewer state to check
+     * @return true if this state is registered for the viewer in this renderer
+     */
+    public boolean hasRegisteredTeam(@NotNull ViewerState state) {
+        final TargetData data = this.targetData.get(state.target);
+        return data != null && data.viewers.get(state.viewer) == state;
+    }
+
+    /**
      * Sends TEAM REMOVE to the viewer and drops them from the per-target viewer map.
      */
     @Override
