@@ -426,10 +426,10 @@ public final class RenderLoop {
      * <ol>
      *   <li>For {@code REMOVE}: snapshot the current registry members <em>before</em>
      *       clearing, since the protocol carries no player list for this mode.</li>
-     *   <li>Update {@link #teamRegistry} based on mode.</li>
      *   <li>Classify every affected player into <em>modern</em>, <em>legacy</em>, or
      *       <em>unmanaged</em> using the current renderer, or matching modern tag rules
-     *       while the renderer is absent.</li>
+     *       while the renderer is absent. Legacy removals must still belong to the source team.</li>
+     *   <li>Update {@link #teamRegistry} based on mode.</li>
      *   <li>Re-send packets:
      *     <ul>
      *       <li>Modern  → {@link #resendForModernPlayers}</li>
@@ -443,63 +443,29 @@ public final class RenderLoop {
      * <p>The three classification lists ({@link #reuseModernNames}, {@link #reuseLegacyTargets},
      * {@link #reuseUnmanagedNames}) are instance-level buffers cleared at the top of this method.
      * The REMOVE path no longer copies the registry {@code Set} into an {@code ArrayList} — it
-     * holds the {@code Set} reference directly, which is safe because {@code REMOVE} in step 2
+     * holds the {@code Set} reference directly, which is safe because {@code REMOVE} in step 3
      * removes the set from the map without modifying its contents.
      */
     private void handleTeamPacket(@NotNull RenderTask.TeamPacket t) {
         final int viewerId = t.viewer().getEntityId();
         final WrapperPlayServerTeams.TeamMode mode = t.mode();
+        Map<String, Set<String>> viewerTeams = this.teamRegistry.get(viewerId);
+        final Set<String> sourceMembers = viewerTeams != null ? viewerTeams.get(t.teamName()) : null;
 
         // ── Step 1: Resolve affected players ─────────────────────────────────
         // For REMOVE the protocol sends no player list; read the registry before clearing.
         // UPDATE has no membership payload, so classify its existing members as well.
         // Empty CREATE/ADD/REMOVE_ENTITIES must retain their empty membership payload.
-        // No copy is needed: REMOVE only removes the Set from the map (step 2), it does
-        // not modify the Set itself, so a direct reference is safe to iterate afterward.
+        // Classification reads source membership before the registry is changed.
         final Collection<String> affectedPlayers;
         if (mode == WrapperPlayServerTeams.TeamMode.REMOVE
                 || mode == WrapperPlayServerTeams.TeamMode.UPDATE && t.players().isEmpty()) {
-            final Map<String, Set<String>> viewerTeams = this.teamRegistry.get(viewerId);
-            affectedPlayers = (viewerTeams != null)
-                    ? viewerTeams.getOrDefault(t.teamName(), Set.of())
-                    : Set.of();
+            affectedPlayers = sourceMembers != null ? sourceMembers : Set.of();
         } else {
             affectedPlayers = t.players();
         }
 
-        // ── Step 2: Update team registry ──────────────────────────────────────
-        switch (mode) {
-            case CREATE, ADD_ENTITIES -> {
-                if (!t.players().isEmpty()) {
-                    final Map<String, Set<String>> viewerTeams = this.teamRegistry
-                            .computeIfAbsent(viewerId, $ -> new HashMap<>());
-                    final Set<String> members = viewerTeams
-                            .computeIfAbsent(t.teamName(), $ -> new HashSet<>());
-                    for (final Set<String> previousMembers : viewerTeams.values()) {
-                        if (previousMembers == members) continue;
-                        for (final String name : t.players()) previousMembers.remove(name);
-                    }
-                    members.addAll(t.players());
-                }
-            }
-            case REMOVE_ENTITIES -> {
-                final Map<String, Set<String>> viewerTeams = this.teamRegistry.get(viewerId);
-                if (viewerTeams != null) {
-                    final Set<String> members = viewerTeams.get(t.teamName());
-                    if (members != null) {
-                        t.players().forEach(members::remove);
-                        if (members.isEmpty()) viewerTeams.remove(t.teamName());
-                    }
-                }
-            }
-            case REMOVE -> {
-                final Map<String, Set<String>> viewerTeams = this.teamRegistry.get(viewerId);
-                if (viewerTeams != null) viewerTeams.remove(t.teamName());
-            }
-            case UPDATE -> { /* no membership change */ }
-        }
-
-        // ── Step 3: Classify affected players (reusable lists, no per-call allocation) ──
+        // ── Step 2: Classify affected players (reusable lists, no per-call allocation) ──
         this.reuseModernNames.clear();
         this.reuseLegacyTargets.clear();
         this.reuseUnmanagedNames.clear();
@@ -515,10 +481,39 @@ public final class RenderLoop {
                 this.reuseModernNames.add(name);
             } else if (state == null || state.renderer == null) {
                 this.reuseUnmanagedNames.add(name);
-            } else {
-                // LegacyRenderer (or any future renderer that manages its own team)
+            } else if (mode != WrapperPlayServerTeams.TeamMode.REMOVE_ENTITIES
+                    || sourceMembers != null && sourceMembers.contains(name)) {
                 this.reuseLegacyTargets.add(target);
             }
+        }
+
+        // ── Step 3: Update team registry ──────────────────────────────────────
+        switch (mode) {
+            case CREATE, ADD_ENTITIES -> {
+                if (!t.players().isEmpty()) {
+                    if (viewerTeams == null) {
+                        viewerTeams = new HashMap<>();
+                        this.teamRegistry.put(viewerId, viewerTeams);
+                    }
+                    final Set<String> members = sourceMembers != null ? sourceMembers
+                            : viewerTeams.computeIfAbsent(t.teamName(), $ -> new HashSet<>());
+                    for (final Set<String> previousMembers : viewerTeams.values()) {
+                        if (previousMembers == members) continue;
+                        for (final String name : t.players()) previousMembers.remove(name);
+                    }
+                    members.addAll(t.players());
+                }
+            }
+            case REMOVE_ENTITIES -> {
+                if (sourceMembers != null) {
+                    t.players().forEach(sourceMembers::remove);
+                    if (sourceMembers.isEmpty()) viewerTeams.remove(t.teamName());
+                }
+            }
+            case REMOVE -> {
+                if (viewerTeams != null) viewerTeams.remove(t.teamName());
+            }
+            case UPDATE -> { /* no membership change */ }
         }
 
         // ── Step 4: Obtain viewer channel ─────────────────────────────────────
