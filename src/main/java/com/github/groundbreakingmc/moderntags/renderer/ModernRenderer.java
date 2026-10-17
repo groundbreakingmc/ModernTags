@@ -211,9 +211,14 @@ public final class ModernRenderer implements TagRenderer {
     // ── Passenger IDs ─────────────────────────────────────────────────────────
 
     /**
-     * Returns the tag entity IDs owned by this renderer for {@code state.target}. Used by RenderLoop for SET_PASSENGERS merging.
+     * Returns the display ID only for a rendered pair registered in this renderer.
+     * A spawned display is eligible even while its delayed attachment is pending.
+     *
+     * @param state the pair whose display may be merged into a passenger packet
+     * @return the current display ID, or an empty array if this pair has no rendered display
      */
     public int[] ownedPassengerIds(@NotNull ViewerState state) {
+        if (!state.rendered) return new int[0];
         final TargetData data = this.targetData.get(state.target);
         return data != null ? new int[]{data.tagEntityId} : new int[0];
     }
