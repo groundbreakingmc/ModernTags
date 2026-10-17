@@ -427,7 +427,8 @@ public final class RenderLoop {
      *   <li>Re-send packets:
      *     <ul>
      *       <li>Modern  → {@link #resendForModernPlayers}</li>
-     *       <li>Legacy  → {@link ViewerState#teamColor} stored; {@code updatePlaceholders} triggered</li>
+     *       <li>Legacy  → {@link ViewerState#teamColor} stored;
+     *           {@link LegacyRenderer#updateViewer(ViewerState)} triggered</li>
      *       <li>Unmanaged / empty-player-list → {@link #resendForUnmanagedPlayers}</li>
      *     </ul>
      *   </li>
@@ -535,11 +536,8 @@ public final class RenderLoop {
                 state.teamColor = rawColor instanceof NamedTextColor nc ? nc : null;
             }
 
-            // Re-render so the new (or cleared) color is applied immediately.
-            if (state.rendered) {
-                //noinspection DataFlowIssue
-                state.renderer.updatePlaceholders(state);
-            }
+            // Refresh only this viewer so the new (or cleared) color is applied immediately.
+            ((LegacyRenderer) state.renderer).updateViewer(state);
         }
 
         // ── Step 7: Re-send for unmanaged players (and info-only packets) ─────

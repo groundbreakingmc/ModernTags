@@ -225,7 +225,7 @@ public final class LegacyRenderer implements TagRenderer {
         if (data == null || data.viewers.isEmpty()) return;
 
         data.currentFrame = (data.currentFrame + 1) % this.frames.size();
-        this.broadcastFullUpdate(state.target, data);
+        this.broadcastFullUpdate(data);
     }
 
     /**
@@ -235,7 +235,22 @@ public final class LegacyRenderer implements TagRenderer {
     public void updatePlaceholders(@NotNull ViewerState state) {
         final TargetData data = this.targetData.get(state.target);
         if (data == null || data.viewers.isEmpty()) return;
-        this.broadcastFullUpdate(state.target, data);
+        this.broadcastFullUpdate(data);
+    }
+
+    /**
+     * Refreshes the current text, name color and below-name score for one rendered pair.
+     * Hidden pairs retain their visibility until the render loop shows them again.
+     *
+     * @param state the current pair whose tag is refreshed
+     */
+    public void updateViewer(@NotNull ViewerState state) {
+        if (!state.rendered) return;
+
+        final TargetData data = this.targetData.get(state.target);
+        if (data == null) return;
+
+        this.sendFullUpdate(state, data, this.frames.get(data.currentFrame));
     }
 
     /**
@@ -285,17 +300,22 @@ public final class LegacyRenderer implements TagRenderer {
      * Iterates {@link TargetData#viewers} so {@link ViewerState#teamColor} is available
      * for name-color resolution without any additional lookups.
      */
-    private void broadcastFullUpdate(@NotNull Player target, @NotNull TargetData data) {
+    private void broadcastFullUpdate(@NotNull TargetData data) {
         final Frame frame = this.frames.get(data.currentFrame);
         for (final ViewerState viewerState : data.viewers.values()) {
             if (!viewerState.rendered) continue;
-            final Object channel = this.protocolManager.getChannel(viewerState.viewer.getUniqueId());
-            if (channel == null) continue;
-            this.protocolManager.sendPacketSilently(channel,
-                    this.buildTeamPacket(viewerState, data, frame, false, true));
-            this.protocolManager.sendPacketSilently(channel,
-                    this.buildUpdateScorePacket(target, viewerState.viewer));
+            this.sendFullUpdate(viewerState, data, frame);
         }
+    }
+
+    private void sendFullUpdate(@NotNull ViewerState state, @NotNull TargetData data, @NotNull Frame frame) {
+        final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
+        if (channel == null) return;
+
+        this.protocolManager.sendPacketSilently(channel,
+                this.buildTeamPacket(state, data, frame, false, true));
+        this.protocolManager.sendPacketSilently(channel,
+                this.buildUpdateScorePacket(state.target, state.viewer));
     }
 
     // ── Color resolution ──────────────────────────────────────────────────────
