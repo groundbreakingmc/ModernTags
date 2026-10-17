@@ -123,7 +123,7 @@ public final class RenderLoop {
      * method returns (they are never stored or passed to code that retains them).
      */
     private final ArrayList<String> reuseModernNames = new ArrayList<>();
-    private final ArrayList<Player> reuseLegacyTargets = new ArrayList<>();
+    private final ArrayList<ViewerState> reuseLegacyStates = new ArrayList<>();
     private final ArrayList<String> reuseUnmanagedNames = new ArrayList<>();
 
     /**
@@ -204,7 +204,14 @@ public final class RenderLoop {
             case RenderTask.StopTracking(var target, var viewer) -> this.handleStopTracking(target, viewer);
             case RenderTask.StopRendering(var target, var viewer) -> this.handleStop(target, viewer);
             case RenderTask.SuppressChange s -> this.handleSuppress(s);
-            case RenderTask.TeamPacket t -> this.handleTeamPacket(t);
+            case RenderTask.TeamPacket t -> {
+                try {
+                    this.handleTeamPacket(t);
+                } finally {
+                    // Pair references belong to this TEAM task, including failed sends.
+                    this.reuseLegacyStates.clear();
+                }
+            }
             case RenderTask.PassengersUpdate p -> this.handlePassengers(p);
             case RenderTask.Cleanup(var player) -> this.handleCleanup(player);
             case RenderTask.InitializeAll() -> this.handleInitializeAll();
@@ -339,18 +346,15 @@ public final class RenderLoop {
     }
 
     private void handleSuppress(@NotNull RenderTask.SuppressChange s) {
-        this.applySuppressChange(s.target(), s.viewer(), s.reason(), s.add());
+        final ViewerState state = this.states.get(key(s.target(), s.viewer()));
+        if (state != null) this.applySuppressChange(state, s.reason(), s.add());
     }
 
     /**
      * Core suppress logic, extracted so it can be called directly from
      * {@link #handlePassengers} without posting a task back to the queue.
      */
-    private void applySuppressChange(
-            @NotNull Player target, @NotNull Player viewer, byte reason, boolean add) {
-        final ViewerState state = this.states.get(key(target, viewer));
-        if (state == null) return;
-
+    private void applySuppressChange(@NotNull ViewerState state, byte reason, boolean add) {
         if (add) {
             if (state.hasSuppress(reason)) return;
             state.addSuppress(reason);
@@ -435,8 +439,9 @@ public final class RenderLoop {
      * </ol>
      *
      * <h3>Allocation notes</h3>
-     * <p>The three classification lists ({@link #reuseModernNames}, {@link #reuseLegacyTargets},
-     * {@link #reuseUnmanagedNames}) are instance-level buffers cleared at the top of this method.
+     * <p>The three classification lists ({@link #reuseModernNames}, {@link #reuseLegacyStates},
+     * {@link #reuseUnmanagedNames}) are instance-level buffers. Name lists are cleared here;
+     * pair references are released by the task dispatcher after processing, including failures.
      * The REMOVE path no longer copies the registry {@code Set} into an {@code ArrayList} — it
      * holds the {@code Set} reference directly, which is safe because {@code REMOVE} in step 3
      * removes the set from the map without modifying its contents.
@@ -462,7 +467,6 @@ public final class RenderLoop {
 
         // ── Step 2: Classify affected players (reusable lists, no per-call allocation) ──
         this.reuseModernNames.clear();
-        this.reuseLegacyTargets.clear();
         this.reuseUnmanagedNames.clear();
 
         for (final String name : affectedPlayers) {
@@ -472,13 +476,13 @@ public final class RenderLoop {
                 continue;
             }
             final ViewerState state = this.states.get(key(target, t.viewer()));
-            if (this.usesModernRenderer(target, t.viewer())) {
+            if (this.usesModernRenderer(target, t.viewer(), state)) {
                 this.reuseModernNames.add(name);
             } else if (state == null || state.renderer == null) {
                 this.reuseUnmanagedNames.add(name);
             } else if (mode != WrapperPlayServerTeams.TeamMode.REMOVE_ENTITIES
                     || sourceMembers != null && sourceMembers.contains(name)) {
-                this.reuseLegacyTargets.add(target);
+                this.reuseLegacyStates.add(state);
             }
         }
 
@@ -521,10 +525,7 @@ public final class RenderLoop {
         // ── Step 6: Update color for LegacyRenderer players ───────────────────
         // The packet itself is NOT forwarded — LegacyRenderer owns these teams.
         // Only the resolved NamedTextColor is persisted (not the full packet wrapper).
-        for (final Player target : this.reuseLegacyTargets) {
-            final ViewerState state = this.states.get(key(target, t.viewer()));
-            if (state == null) continue;
-
+        for (final ViewerState state : this.reuseLegacyStates) {
             if (mode == WrapperPlayServerTeams.TeamMode.REMOVE
                     || mode == WrapperPlayServerTeams.TeamMode.REMOVE_ENTITIES) {
                 // Server removed the player from a team → clear stored color so LegacyRenderer
@@ -565,7 +566,9 @@ public final class RenderLoop {
             if (team != null) {
                 for (final String name : List.copyOf(team.members)) {
                     final Player target = Bukkit.getPlayerExact(name);
-                    if (target != null && target != t.viewer() && this.usesModernRenderer(target, t.viewer())) {
+                    if (target == null || target == t.viewer()) continue;
+                    final ViewerState state = this.states.get(key(target, t.viewer()));
+                    if (this.usesModernRenderer(target, t.viewer(), state)) {
                         this.addToHiddenTeam(target, t.viewer(), channel);
                     }
                 }
@@ -776,8 +779,7 @@ public final class RenderLoop {
         }
     }
 
-    private boolean usesModernRenderer(@NotNull Player target, @NotNull Player viewer) {
-        final ViewerState state = this.states.get(key(target, viewer));
+    private boolean usesModernRenderer(@NotNull Player target, @NotNull Player viewer, @Nullable ViewerState state) {
         if (state != null && state.renderer != null) return state.renderer instanceof ModernRenderer;
         return (target != viewer || viewer.hasPermission("moderntags.see.own"))
                 && this.resolveRenderer(target, viewer) instanceof ModernRenderer;
@@ -813,7 +815,7 @@ public final class RenderLoop {
             // drain, so re-posting would add unnecessary queue overhead and one extra object
             // allocation (RenderTask.SuppressChange record).
             final boolean hasReal = p.incomingPassengers().length > 0;
-            this.applySuppressChange(p.target(), p.viewer(), ViewerState.SUPPRESS_PASSENGER, hasReal);
+            if (state != null) this.applySuppressChange(state, ViewerState.SUPPRESS_PASSENGER, hasReal);
             this.sendPassengers(channel, p.target().getEntityId(), p.incomingPassengers());
             return;
         }
