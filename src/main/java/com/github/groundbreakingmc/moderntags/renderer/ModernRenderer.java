@@ -246,10 +246,8 @@ public final class ModernRenderer implements TagRenderer {
                 TEXT_COMPONENT_INDEX, EntityDataTypes.ADV_COMPONENT,
                 this.plugin.tagTextResolver().resolve(state, frame.text())
         ));
-        metadata.add(new EntityData<>(
-                TEXT_OPACITY_INDEX, EntityDataTypes.BYTE,
-                state.hasSuppress(ViewerState.SUPPRESS_SNEAK) ? frame.sneakOpacity() : frame.defaultOpacity()
-        ));
+        metadata.add(state.hasSuppress(ViewerState.SUPPRESS_SNEAK)
+                ? frame.dataWithSneakOpacity().getFirst() : frame.dataWithDefaultOpacity().getFirst());
         return new WrapperPlayServerEntityMetadata(data.tagEntityId, metadata);
     }
 
@@ -290,19 +288,15 @@ public final class ModernRenderer implements TagRenderer {
     public static final class Frame {
 
         private final Text<ViewerState> text;
-        private final byte defaultOpacity;
         private final List<EntityData<?>> dataWithDefaultOpacity;
-        private final byte sneakOpacity;
         private final List<EntityData<?>> dataWithSneakOpacity;
         private final List<EntityData<?>> entityData;
 
         Frame(@NotNull Text<ViewerState> text, byte defaultTextOpacity, byte sneakTextOpacity,
               @NotNull List<EntityData<?>> entityData) {
             this.text = text;
-            this.defaultOpacity = defaultTextOpacity;
-            this.dataWithDefaultOpacity = List.of(new EntityData<>(26, EntityDataTypes.BYTE, defaultTextOpacity));
-            this.sneakOpacity = sneakTextOpacity;
-            this.dataWithSneakOpacity = List.of(new EntityData<>(26, EntityDataTypes.BYTE, sneakTextOpacity));
+            this.dataWithDefaultOpacity = List.of(new EntityData<>(TEXT_OPACITY_INDEX, EntityDataTypes.BYTE, defaultTextOpacity));
+            this.dataWithSneakOpacity = List.of(new EntityData<>(TEXT_OPACITY_INDEX, EntityDataTypes.BYTE, sneakTextOpacity));
             this.entityData = ImmutableList.copyOf(entityData);
         }
 
@@ -310,16 +304,8 @@ public final class ModernRenderer implements TagRenderer {
             return this.text;
         }
 
-        public byte defaultOpacity() {
-            return this.defaultOpacity;
-        }
-
         public List<EntityData<?>> dataWithDefaultOpacity() {
             return this.dataWithDefaultOpacity;
-        }
-
-        public byte sneakOpacity() {
-            return this.sneakOpacity;
         }
 
         public List<EntityData<?>> dataWithSneakOpacity() {
