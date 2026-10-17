@@ -406,14 +406,8 @@ public final class RenderLoop {
                 }
             }
             state.rendered = true;
-        }
-
-        if (state.renderer instanceof ModernRenderer modern) {
-            if (suppressMask == ViewerState.SUPPRESS_SNEAK) {
-                modern.applySneakOpacity(state);
-            } else {
-                modern.removeSneakOpacity(state);
-            }
+        } else if (state.renderer instanceof ModernRenderer modern) {
+            modern.updateOpacity(state);
         }
     }
 

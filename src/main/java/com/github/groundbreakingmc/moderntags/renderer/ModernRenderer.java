@@ -38,8 +38,9 @@ import java.util.concurrent.TimeUnit;
  * {@link #targetData}, keyed by Player reference. All fields are accessed during drain
  * only (single writer, no synchronisation needed).
  *
- * <p>Sneak opacity is applied directly by {@link com.github.groundbreakingmc.moderntags.core.RenderLoop}
- * via {@link #applySneakOpacity}/{@link #removeSneakOpacity} when the suppress mask transitions.
+ * <p>Spawn metadata includes the current sneak opacity.
+ * {@link com.github.groundbreakingmc.moderntags.core.RenderLoop} uses {@link #updateOpacity}
+ * to refresh it while the display remains rendered.
  */
 public final class ModernRenderer implements TagRenderer {
 
@@ -181,9 +182,11 @@ public final class ModernRenderer implements TagRenderer {
     // ── Sneak opacity ─────────────────────────────────────────────────────────
 
     /**
-     * Sends a metadata packet with reduced opacity to indicate the crouching state.
+     * Updates an existing display's opacity for the pair's current sneaking state.
+     *
+     * @param state the rendered pair whose opacity is refreshed
      */
-    public void applySneakOpacity(@NotNull ViewerState state) {
+    public void updateOpacity(@NotNull ViewerState state) {
         final TargetData data = this.targetData.get(state.target);
         if (data == null) return;
         final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
@@ -191,21 +194,9 @@ public final class ModernRenderer implements TagRenderer {
 
         final Frame frame = this.frames.get(data.currentFrame);
         this.protocolManager.sendPacketSilently(channel,
-                new WrapperPlayServerEntityMetadata(data.tagEntityId, frame.dataWithSneakOpacity()));
-    }
-
-    /**
-     * Restores the default opacity after crouching ends.
-     */
-    public void removeSneakOpacity(@NotNull ViewerState state) {
-        final TargetData data = this.targetData.get(state.target);
-        if (data == null) return;
-        final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
-        if (channel == null) return;
-
-        final Frame frame = this.frames.get(data.currentFrame);
-        this.protocolManager.sendPacketSilently(channel,
-                new WrapperPlayServerEntityMetadata(data.tagEntityId, frame.dataWithDefaultOpacity()));
+                new WrapperPlayServerEntityMetadata(data.tagEntityId,
+                        state.hasSuppress(ViewerState.SUPPRESS_SNEAK)
+                                ? frame.dataWithSneakOpacity() : frame.dataWithDefaultOpacity()));
     }
 
     // ── Passenger IDs ─────────────────────────────────────────────────────────
