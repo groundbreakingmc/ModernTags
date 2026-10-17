@@ -471,10 +471,15 @@ public final class RenderLoop {
         switch (mode) {
             case CREATE, ADD_ENTITIES -> {
                 if (!t.players().isEmpty()) {
-                    this.teamRegistry
-                            .computeIfAbsent(viewerId, $ -> new HashMap<>())
-                            .computeIfAbsent(t.teamName(), $ -> new HashSet<>())
-                            .addAll(t.players());
+                    final Map<String, Set<String>> viewerTeams = this.teamRegistry
+                            .computeIfAbsent(viewerId, $ -> new HashMap<>());
+                    final Set<String> members = viewerTeams
+                            .computeIfAbsent(t.teamName(), $ -> new HashSet<>());
+                    for (final Set<String> previousMembers : viewerTeams.values()) {
+                        if (previousMembers == members) continue;
+                        for (final String name : t.players()) previousMembers.remove(name);
+                    }
+                    members.addAll(t.players());
                 }
             }
             case REMOVE_ENTITIES -> {
