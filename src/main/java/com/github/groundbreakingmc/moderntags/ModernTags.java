@@ -11,6 +11,7 @@ import com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer;
 import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
 import com.github.groundbreakingmc.moderntags.text.TagTextResolver;
 import com.github.groundbreakingmc.moderntags.update.UpdateManager;
+import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
 import com.github.groundbreakingmc.mylib.updateschecker.UpdatesChecker;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerCommon;
@@ -53,6 +54,9 @@ public final class ModernTags extends JavaPlugin {
         this.updateManager = new UpdateManager(this, this.renderLoop);
         this.updateManager.start(this.configValues.tickRate());
 
+        super.getServer().getPluginManager().registerEvents(new BukkitListener(this.renderLoop), this);
+        Bukkit.getOnlinePlayers().forEach(PlayerLookup::register);
+
         this.packetListener = PacketEvents.getAPI().getEventManager().registerListener(
                 new PacketListener(this, this.renderLoop)
         );
@@ -63,8 +67,6 @@ public final class ModernTags extends JavaPlugin {
             this.luckPermsListener = new LuckPermsListener(this, this.renderLoop, lp.getProvider());
             this.luckPermsListener.register();
         }
-
-        super.getServer().getPluginManager().registerEvents(new BukkitListener(this.renderLoop), this);
 
         final var updatesChecker = new UpdatesChecker(this,
                 "https://raw.githubusercontent.com/groundbreakingmc/ModernTags/main/update.txt",
@@ -101,6 +103,8 @@ public final class ModernTags extends JavaPlugin {
         if (this.packetListener != null) {
             PacketEvents.getAPI().getEventManager().unregisterListener(this.packetListener);
         }
+
+        PlayerLookup.clear();
 
         if (this.luckPermsListener != null) {
             this.luckPermsListener.unregister();

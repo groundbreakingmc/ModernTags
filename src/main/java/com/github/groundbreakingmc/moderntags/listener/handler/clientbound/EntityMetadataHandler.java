@@ -6,6 +6,7 @@ import com.github.groundbreakingmc.moderntags.core.ViewerState;
 import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
 import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
 import com.github.retrooper.packetevents.protocol.entity.pose.EntityPose;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
@@ -43,10 +44,21 @@ public final class EntityMetadataHandler implements ClientBoundPacketHandler {
     public void handle(@NotNull PacketSendEvent event) {
         if (event.getUser().getClientVersion().isOlderThan(ClientVersion.V_1_19_4)) return;
 
-        final var packet = new WrapperPlayServerEntityMetadata(event);
+        WrapperPlayServerEntityMetadata packet = null;
+        final int entityId;
+        if (event.getLastUsedWrapper() != null) {
+            // Bind earlier metadata edits to this event's buffer and protocol context.
+            packet = new WrapperPlayServerEntityMetadata(event);
+            entityId = packet.getEntityId();
+        } else {
+            entityId = readEntityId(event.getByteBuf());
+        }
 
         final Player viewer = event.getPlayer();
-        if (viewer.getEntityId() == packet.getEntityId()) return;
+        if (viewer.getEntityId() == entityId) return;
+        final var target = PlayerLookup.playerById(entityId);
+        if (target == null) return;
+        if (packet == null) packet = new WrapperPlayServerEntityMetadata(event);
 
         byte changedMask = 0;
         byte values = 0;
@@ -65,10 +77,18 @@ public final class EntityMetadataHandler implements ClientBoundPacketHandler {
         }
 
         if (changedMask == 0) return;
-        final var target = PlayerLookup.playerById(packet.getEntityId());
-        if (target == null) return;
 
         // Flags and pose belong to one packet; apply them without an intermediate visibility state.
         this.renderLoop.post(new RenderTask.SuppressChange(target, viewer, changedMask, values));
+    }
+
+    private static int readEntityId(Object buffer) {
+        final int readerIdx = ByteBufHelper.readerIndex(buffer);
+        try {
+            return ByteBufHelper.readVarInt(buffer);
+        } finally {
+            // Leave the payload untouched for decoding and later listeners, including failed reads.
+            ByteBufHelper.readerIndex(buffer, readerIdx);
+        }
     }
 }
