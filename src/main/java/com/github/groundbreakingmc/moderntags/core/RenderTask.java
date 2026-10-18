@@ -33,8 +33,6 @@ public sealed interface RenderTask permits
         RenderTask.TeamPacket,
         RenderTask.Tick {
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
-
     /**
      * Start rendering {@code target}'s tag for {@code viewer}.
      */
@@ -45,7 +43,9 @@ public sealed interface RenderTask permits
      */
     record StopRendering(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
 
-    /** Refreshes an existing tracked pair; tab-list membership alone does not establish tracking. */
+    /**
+     * Refreshes an existing tracked pair; tab-list membership alone does not establish tracking.
+     */
     record RenderIfTracked(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
 
     /**
@@ -57,48 +57,61 @@ public sealed interface RenderTask permits
      */
     record GameModeUpdate(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
 
-    /** Registers a native player spawn before scheduling its delayed tag render. */
+    /**
+     * Registers a native player spawn before scheduling its delayed tag render.
+     */
     record ScheduleRender(@NotNull Player target, @NotNull Player viewer,
                           @NotNull Plugin plugin) implements RenderTask {}
 
-    /** The readiness marker is the only field published by the scheduler callback. */
+    /**
+     * The readiness marker is the only field published by the scheduler callback.
+     */
     record RenderWhenCurrent(@NotNull ViewerState state, long generation,
                              @NotNull AtomicBoolean ready) implements RenderTask {
+
         public RenderWhenCurrent(@NotNull ViewerState state, long generation) {
             this(state, generation, new AtomicBoolean());
         }
     }
 
-    /** A delayed attachment is valid only for the renderer and generation that spawned it. */
+    /**
+     * A delayed attachment is valid only for the renderer and generation that spawned it.
+     */
     record AttachTag(@NotNull ViewerState state, long generation,
-                     @NotNull ModernRenderer renderer, int tagEntityId, @NotNull Object channel,
+                     @NotNull ModernRenderer renderer, int tagEntityId,
                      @NotNull AtomicBoolean ready) implements RenderTask {
+
         public AttachTag(@NotNull ViewerState state, long generation,
-                         @NotNull ModernRenderer renderer, int tagEntityId, @NotNull Object channel) {
-            this(state, generation, renderer, tagEntityId, channel, new AtomicBoolean());
+                         @NotNull ModernRenderer renderer, int tagEntityId) {
+            this(state, generation, renderer, tagEntityId, new AtomicBoolean());
         }
     }
 
-    /** Ends native player tracking and cancels rendering, including a pending spawn. */
+    /**
+     * Ends native player tracking and cancels rendering, including a pending spawn.
+     */
     record StopTracking(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
 
-    // ── State changes ─────────────────────────────────────────────────────────
-
     /**
-     * A suppression reason was added or removed for a (target, viewer) pair.
+     * Suppression bits were updated for a (target, viewer) pair.
      *
-     * <p>{@code reason} is one of {@link ViewerState#SUPPRESS_INVISIBLE},
-     * {@link ViewerState#SUPPRESS_SNEAK}, or {@link ViewerState#SUPPRESS_PASSENGER}.
-     * {@code add=true} sets the bit; {@code add=false} clears it.
+     * <p>{@code changedMask} selects the affected {@link ViewerState} suppression bits.
+     * {@code values} sets the selected bits; selected bits absent from values are cleared.
      */
     record SuppressChange(
             @NotNull Player target,
             @NotNull Player viewer,
-            byte reason,
-            boolean add
-    ) implements RenderTask {}
+            byte changedMask,
+            byte values
+    ) implements RenderTask {
 
-    // ── Team packet ───────────────────────────────────────────────────────────
+        /**
+         * Sets or clears the supplied reasons while preserving all other causes.
+         */
+        public SuppressChange(@NotNull Player target, @NotNull Player viewer, byte reason, boolean add) {
+            this(target, viewer, reason, add ? reason : (byte) 0);
+        }
+    }
 
     /**
      * A TEAMS packet was intercepted for {@code viewer} (already cancelled by the handler).
@@ -110,7 +123,7 @@ public sealed interface RenderTask permits
      *       suppress the vanilla nametag; CREATE is tracked per-viewer to avoid sending UPDATE
      *       before the client knows the team.</li>
      *   <li><b>LegacyRenderer players</b> — packet is dropped (LegacyRenderer owns their team);
-     *       color/snapshot stored in {@link ViewerState#teamSnapshot} for name-color resolution.</li>
+     *       color stored in {@link ViewerState#teamColor} for name-color resolution.</li>
      *   <li><b>Unmanaged players</b> — packet forwarded as-is, including info-only packets
      *       (empty {@code players}) used by plugins like TAB for sidebar/tab-list display.</li>
      * </ul>
@@ -129,8 +142,6 @@ public sealed interface RenderTask permits
             @NotNull List<String> players
     ) implements RenderTask {}
 
-    // ── Passengers ────────────────────────────────────────────────────────────
-
     /**
      * Server sent a SET_PASSENGERS for {@code target} (already cancelled by the handler).
      * {@code incomingPassengers} is a safe copy. RenderLoop merges renderer-owned IDs and re-sends.
@@ -141,14 +152,10 @@ public sealed interface RenderTask permits
             int @NotNull [] incomingPassengers
     ) implements RenderTask {}
 
-    // ── Cleanup ───────────────────────────────────────────────────────────────
-
     /**
      * Remove all state where {@code player} appears as target or viewer.
      */
     record Cleanup(@NotNull Player player) implements RenderTask {}
-
-    // ── Bulk operations ───────────────────────────────────────────────────────
 
     /**
      * Render all (target, viewer) pairs for all online players. Posted on enable/reload.
@@ -162,11 +169,9 @@ public sealed interface RenderTask permits
      */
     record InvalidateAll(boolean shutdown) implements RenderTask {}
 
-    // ── Periodic tick ─────────────────────────────────────────────────────────
-
     /**
      * Periodic tick for animation frames and placeholder updates.
-     * {@code currentTick} is the server tick counter at post-time.
+     * {@code currentTick} is the UpdateManager's local tick counter at post-time.
      */
     record Tick(int currentTick) implements RenderTask {}
 }

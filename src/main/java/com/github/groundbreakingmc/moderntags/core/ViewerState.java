@@ -1,6 +1,7 @@
 package com.github.groundbreakingmc.moderntags.core;
 
 import com.github.groundbreakingmc.moderntags.renderer.TagRenderer;
+import com.github.retrooper.packetevents.PacketEvents;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
@@ -12,13 +13,13 @@ import org.jetbrains.annotations.Nullable;
  * <p>Owned exclusively by {@link RenderLoop} — all reads/writes occur during drain,
  * so no synchronisation is needed.
  *
- * <h3>Suppress mask</h3>
+ * <h2>Suppress mask</h2>
  * <pre>
  *   0x01  INVISIBLE  – target is invisible to this viewer
  *   0x02  SNEAK      – target is crouching (reduced opacity)
  *   0x04  PASSENGER  – target has a real passenger; tag hidden
  * </pre>
- * When {@code suppressMask != 0} the tag is hidden. Each cause sets only its own bit.
+ * Each cause sets only its own bit; RenderLoop resolves visibility and opacity for the viewer.
  */
 public final class ViewerState {
 
@@ -37,12 +38,18 @@ public final class ViewerState {
     public final Player viewer;
 
     /**
+     * Connection already established when this pair is created. A new login creates
+     * new pair state; delayed attachment still checks whether the connection is open.
+     */
+    public final Object channel;
+
+    /**
      * Active renderer for this pair, or {@code null} if the tag has never been rendered / was stopped.
      */
     public @Nullable TagRenderer renderer;
 
     /**
-     * Bitmask of active suppression reasons. Tag is rendered only when this equals {@code 0}.
+     * Raw suppression reasons. RenderLoop determines their effect on visibility and opacity.
      */
     public byte suppressMask;
 
@@ -58,16 +65,24 @@ public final class ViewerState {
      */
     public boolean active;
 
-    /** Whether a native spawn or initialization established this viewer's tracking. */
+    /**
+     * Whether a native spawn or initialization established this viewer's tracking.
+     */
     public boolean tracked;
 
-    /** Invalidates delayed operations whenever this pair's rendering changes. */
+    /**
+     * Invalidates delayed operations whenever this pair's rendering changes.
+     */
     public long renderGeneration;
 
-    /** Current delayed native spawn; the reference is owned by the render loop. */
+    /**
+     * Current delayed native spawn; the reference is owned by the render loop.
+     */
     public @Nullable RenderTask.RenderWhenCurrent pendingSpawn;
 
-    /** Current delayed attachment; the reference is owned by the render loop. */
+    /**
+     * Current delayed attachment; the reference is owned by the render loop.
+     */
     public @Nullable RenderTask.AttachTag pendingAttach;
 
     /**
@@ -88,6 +103,7 @@ public final class ViewerState {
     public ViewerState(@NotNull Player target, @NotNull Player viewer) {
         this.target = target;
         this.viewer = viewer;
+        this.channel = PacketEvents.getAPI().getProtocolManager().getChannel(viewer.getUniqueId());
     }
 
     /**

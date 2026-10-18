@@ -22,8 +22,8 @@ public final class EqualsCondition implements Condition {
 
     @Override
     public boolean test(@NotNull Context context) {
-        final Object left = this.left.value(context);
-        final Object right = this.right.value(context);
+        final var left = this.left.value(context);
+        final var right = this.right.value(context);
         return left == null || right == null ? left == right : left.equals(right);
     }
 }

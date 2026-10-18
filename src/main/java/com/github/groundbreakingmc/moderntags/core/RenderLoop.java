@@ -1,6 +1,5 @@
 package com.github.groundbreakingmc.moderntags.core;
 
-import com.github.groundbreakingmc.moderntags.config.model.TagEntry;
 import com.github.groundbreakingmc.moderntags.config.model.TagGroup;
 import com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer;
 import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
@@ -8,16 +7,22 @@ import com.github.groundbreakingmc.moderntags.renderer.TagRenderer;
 import com.github.groundbreakingmc.moderntags.requirement.Context;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.manager.protocol.ProtocolManager;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams.*;
 import com.google.common.collect.ImmutableList;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongList;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
+import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscArrayQueue;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -31,18 +36,18 @@ import java.util.logging.Logger;
 /**
  * Single owner of all {@link ViewerState} objects and the only writer to them.
  * <p>
- * <h3>Threading model</h3>
+ * <h2>Threading model</h2>
  * <p>Any thread may call {@link #post(RenderTask)} — it is lock-free (MPSC offer).
  * Drain runs on whichever thread wins the {@link #draining} CAS. All state
  * ({@link #states}, renderer internals) is accessed exclusively during drain, so
  * <b>no synchronisation is needed anywhere inside the process methods</b>.
  * <p>
- * <h3>Key encoding</h3>
+ * <h2>Key encoding</h2>
  * <p>Map keys are {@code long}: {@code (target.entityId << 32) | viewer.entityId}.
  * Entity IDs are unique 32-bit ints for the duration of a session, so there are no
  * collisions. This avoids boxing and object allocation on the hot path.
  * <p>
- * <h3>Team packet routing</h3>
+ * <h2>Team packet routing</h2>
  * <p>All TEAMS packets are cancelled by {@link com.github.groundbreakingmc.moderntags.listener.handler.clientbound.UpdateTeamHandler}
  * and posted as {@link RenderTask.TeamPacket}. During drain, {@link #handleTeamPacket} classifies
  * each player in the packet into one of three buckets:
@@ -64,14 +69,14 @@ public final class RenderLoop {
     private static final int QUEUE_CAPACITY = 4096;
 
     private static final String HIDDEN_TEAM_PREFIX = "MT-H-";
-    private static final WrapperPlayServerTeams.ScoreBoardTeamInfo HIDDEN_TEAM_INFO =
-            new WrapperPlayServerTeams.ScoreBoardTeamInfo(
+    private static final ScoreBoardTeamInfo HIDDEN_TEAM_INFO =
+            new ScoreBoardTeamInfo(
                     Component.empty(), Component.empty(), Component.empty(),
-                    WrapperPlayServerTeams.NameTagVisibility.NEVER,
-                    WrapperPlayServerTeams.CollisionRule.ALWAYS,
-                    NamedTextColor.WHITE, WrapperPlayServerTeams.OptionData.NONE);
+                    NameTagVisibility.NEVER,
+                    CollisionRule.ALWAYS,
+                    NamedTextColor.WHITE, OptionData.NONE);
 
-    private final MpscArrayQueue<RenderTask> queue = new MpscArrayQueue<>(QUEUE_CAPACITY);
+    private final MessagePassingQueue<RenderTask> queue = new MpscArrayQueue<>(QUEUE_CAPACITY);
     private final AtomicBoolean draining = new AtomicBoolean(false);
     private final Logger logger;
 
@@ -79,20 +84,20 @@ public final class RenderLoop {
      * (target.entityId << 32) | viewer.entityId → ViewerState.
      * Plain map — only accessed during drain.
      */
-    private final Long2ObjectOpenHashMap<ViewerState> states = new Long2ObjectOpenHashMap<>(256);
+    private final Long2ObjectMap<ViewerState> states = new Long2ObjectOpenHashMap<>(256);
 
     /**
      * viewer.entityId → list of keys where that viewer appears as the <em>viewer</em> half.
      * Enables O(viewers) cleanup instead of a full-map scan.
      */
-    private final Int2ObjectOpenHashMap<LongArrayList> viewerIndex = new Int2ObjectOpenHashMap<>(64);
+    private final Int2ObjectMap<LongList> viewerIndex = new Int2ObjectOpenHashMap<>(64);
 
     /**
      * target.entityId → list of keys where that player appears as the <em>target</em> half.
      * Symmetric counterpart to {@link #viewerIndex}; eliminates the O(n) state-map scan
      * that was previously required when a target player disconnects.
      */
-    private final Int2ObjectOpenHashMap<LongArrayList> targetIndex = new Int2ObjectOpenHashMap<>(64);
+    private final Int2ObjectMap<LongList> targetIndex = new Int2ObjectOpenHashMap<>(64);
 
     /**
      * viewer.entityId → teamName → set of playerNames currently in that team.
@@ -102,8 +107,7 @@ public final class RenderLoop {
      *
      * <p>Drain-only access — no synchronisation needed.
      */
-    private final Int2ObjectOpenHashMap<Map<String, Set<String>>> teamRegistry =
-            new Int2ObjectOpenHashMap<>(64);
+    private final Int2ObjectMap<Map<String, Set<String>>> teamRegistry = new Int2ObjectOpenHashMap<>(64);
 
     /**
      * External and fallback teams actually sent to each viewer.
@@ -111,10 +115,7 @@ public final class RenderLoop {
      * Legacy team creation removes its target from this membership ledger.
      * Drain-only access.
      */
-    private final Int2ObjectOpenHashMap<ClientTeamView> clientTeams =
-            new Int2ObjectOpenHashMap<>(64);
-
-    // ── Per-call reusable buffers (drain-only, never escape handleTeamPacket) ─────────────────
+    private final Int2ObjectMap<ClientTeamView> clientTeams = new Int2ObjectOpenHashMap<>(64);
 
     /**
      * Reused across every {@link #handleTeamPacket} call to avoid allocating three
@@ -122,9 +123,9 @@ public final class RenderLoop {
      * Safe because drain is single-threaded and these lists are consumed before the
      * method returns (they are never stored or passed to code that retains them).
      */
-    private final ArrayList<String> reuseModernNames = new ArrayList<>();
-    private final ArrayList<ViewerState> reuseLegacyStates = new ArrayList<>();
-    private final ArrayList<String> reuseUnmanagedNames = new ArrayList<>();
+    private final List<String> reuseModernNames = new ArrayList<>();
+    private final List<ViewerState> reuseLegacyStates = new ArrayList<>();
+    private final List<String> reuseUnmanagedNames = new ArrayList<>();
 
     /**
      * Targets visited per renderer during a tick. Sets are reused between ticks
@@ -134,7 +135,7 @@ public final class RenderLoop {
 
     private final ProtocolManager protocolManager = PacketEvents.getAPI().getProtocolManager();
 
-    private ImmutableList<TagGroup> groups = ImmutableList.of();
+    private List<TagGroup> groups = ImmutableList.of();
     private boolean hideTagWhenHasPassenger = true;
     private int conditionsRecheckRate = 20;
 
@@ -142,21 +143,17 @@ public final class RenderLoop {
         this.logger = logger;
     }
 
-    // ── Configuration ─────────────────────────────────────────────────────────
-
     public void groups(@NotNull List<TagGroup> groups) {
         this.groups = ImmutableList.copyOf(groups);
     }
 
-    public void hideTagWhenHasPassenger(boolean v) {
-        this.hideTagWhenHasPassenger = v;
+    public void hideTagWhenHasPassenger(boolean enabled) {
+        this.hideTagWhenHasPassenger = enabled;
     }
 
     public void conditionsRecheckRate(int rate) {
         this.conditionsRecheckRate = rate;
     }
-
-    // ── Public API (any thread) ───────────────────────────────────────────────
 
     /**
      * Enqueues a task and attempts to drain the queue on the calling thread.
@@ -166,8 +163,6 @@ public final class RenderLoop {
         this.queue.offer(task);
         this.tryDrain();
     }
-
-    // ── Drain ─────────────────────────────────────────────────────────────────
 
     private void tryDrain() {
         do {
@@ -191,36 +186,35 @@ public final class RenderLoop {
         } while (!this.queue.isEmpty());
     }
 
-    // ── Task dispatch ─────────────────────────────────────────────────────────
-
     private void processTask(@NotNull RenderTask task) {
         switch (task) {
-            case RenderTask.Render(var target, var viewer) -> this.handleRender(target, viewer);
-            case RenderTask.RenderIfTracked(var target, var viewer) -> this.handleRenderIfTracked(target, viewer);
+            case RenderTask.Render(var target, var viewer) -> this.handleRender(this.getOrCreate(target, viewer));
+            case RenderTask.RenderIfTracked(var target, var viewer) ->
+                    this.handleRenderIfTracked(target, viewer, target == viewer
+                            ? this.getOrCreate(target, viewer) : this.states.get(key(target, viewer)));
             case RenderTask.GameModeUpdate(var target, var viewer) -> this.handleGameModeUpdate(target, viewer);
-            case RenderTask.AttachTag a -> this.handleAttach(a);
-            case RenderTask.ScheduleRender s -> this.handleScheduleRender(s);
-            case RenderTask.RenderWhenCurrent r -> this.handleRenderWhenCurrent(r);
+            case RenderTask.AttachTag attachment -> this.handleAttach(attachment);
+            case RenderTask.ScheduleRender spawn -> this.handleScheduleRender(spawn);
+            case RenderTask.RenderWhenCurrent pending -> this.handleRenderWhenCurrent(pending);
             case RenderTask.StopTracking(var target, var viewer) -> this.handleStopTracking(target, viewer);
-            case RenderTask.StopRendering(var target, var viewer) -> this.handleStop(target, viewer);
-            case RenderTask.SuppressChange s -> this.handleSuppress(s);
-            case RenderTask.TeamPacket t -> {
+            case RenderTask.StopRendering(var target, var viewer) ->
+                    this.handleStop(this.states.get(key(target, viewer)));
+            case RenderTask.SuppressChange change -> this.handleSuppress(change);
+            case RenderTask.TeamPacket packet -> {
                 try {
-                    this.handleTeamPacket(t);
+                    this.handleTeamPacket(packet);
                 } finally {
                     // Pair references belong to this TEAM task, including failed sends.
                     this.reuseLegacyStates.clear();
                 }
             }
-            case RenderTask.PassengersUpdate p -> this.handlePassengers(p);
+            case RenderTask.PassengersUpdate update -> this.handlePassengers(update);
             case RenderTask.Cleanup(var player) -> this.handleCleanup(player);
             case RenderTask.InitializeAll() -> this.handleInitializeAll();
             case RenderTask.InvalidateAll(var shutdown) -> this.handleInvalidateAll(shutdown);
             case RenderTask.Tick(var tick) -> this.handleTick(tick);
         }
     }
-
-    // ── Handlers ─────────────────────────────────────────────────────────────
 
     private void handleGameModeUpdate(@NotNull Player target, @NotNull Player viewer) {
         final ViewerState state = this.states.get(key(target, viewer));
@@ -229,10 +223,10 @@ public final class RenderLoop {
             if (target.isInvisible()) state.addSuppress(ViewerState.SUPPRESS_INVISIBLE);
             else state.removeSuppress(ViewerState.SUPPRESS_INVISIBLE);
         }
-        this.handleRenderIfTracked(target, viewer);
+        this.handleRenderIfTracked(target, viewer, state);
 
         if (target != viewer) return;
-        final LongArrayList viewerKeys = this.viewerIndex.get(viewer.getEntityId());
+        final LongList viewerKeys = this.viewerIndex.get(viewer.getEntityId());
         if (viewerKeys == null) return;
         for (int i = 0; i < viewerKeys.size(); i++) {
             final ViewerState viewed = this.states.get(viewerKeys.getLong(i));
@@ -242,26 +236,25 @@ public final class RenderLoop {
         }
     }
 
-    private void handleRenderIfTracked(@NotNull Player target, @NotNull Player viewer) {
+    private void handleRenderIfTracked(@NotNull Player target, @NotNull Player viewer,
+                                       @Nullable ViewerState state) {
         if (target == viewer) {
-            this.handleRender(target, viewer);
+            this.handleRender(state != null ? state : this.getOrCreate(target, viewer));
             return;
         }
-        final ViewerState state = this.states.get(key(target, viewer));
         if (state == null || !state.tracked) return;
         if (state.pendingSpawn != null) {
             this.handleRenderWhenCurrent(state.pendingSpawn);
             return;
         }
-        this.handleRender(target, viewer);
+        this.handleRender(state);
     }
 
     private void handleScheduleRender(@NotNull RenderTask.ScheduleRender spawn) {
-        final ViewerState state = this.getOrCreate(spawn.target(), spawn.viewer());
-        this.handleStop(spawn.target(), spawn.viewer());
+        final var state = this.getOrCreate(spawn.target(), spawn.viewer());
+        this.handleStop(state);
         state.tracked = true;
-        final RenderTask.RenderWhenCurrent pending = new RenderTask.RenderWhenCurrent(
-                state, state.renderGeneration);
+        final var pending = new RenderTask.RenderWhenCurrent(state, state.renderGeneration);
         state.pendingSpawn = pending;
         try {
             Bukkit.getAsyncScheduler().runDelayed(spawn.plugin(), task -> {
@@ -276,31 +269,31 @@ public final class RenderLoop {
     }
 
     private void handleRenderWhenCurrent(@NotNull RenderTask.RenderWhenCurrent pending) {
-        final ViewerState state = pending.state();
-        if (this.states.get(key(state.target, state.viewer)) != state
-                || state.pendingSpawn != pending || !pending.ready().get()
-                || state.renderGeneration != pending.generation() || !state.tracked) return;
+        final var state = pending.state();
+        if (state.pendingSpawn != pending || !pending.ready().get()
+                || state.renderGeneration != pending.generation() || !state.tracked
+                || this.states.get(key(state.target, state.viewer)) != state) return;
         state.pendingSpawn = null;
-        this.handleRender(state.target, state.viewer);
+        this.handleRender(state);
     }
 
     private void handleAttach(@NotNull RenderTask.AttachTag attachment) {
-        final ViewerState state = attachment.state();
-        if (this.states.get(key(state.target, state.viewer)) != state
-                || state.pendingAttach != attachment || !attachment.ready().get()
+        final var state = attachment.state();
+        if (state.pendingAttach != attachment || !attachment.ready().get()
                 || state.renderGeneration != attachment.generation()
-                || !state.active || !state.rendered || state.renderer != attachment.renderer()) return;
+                || !state.active || !state.rendered || state.renderer != attachment.renderer()
+                || this.states.get(key(state.target, state.viewer)) != state) return;
         state.pendingAttach = null;
-        attachment.renderer().attachPassengers(state, attachment.tagEntityId(), attachment.channel());
+        attachment.renderer().attachPassengers(state, attachment.tagEntityId());
     }
 
     private void handleStopTracking(@NotNull Player target, @NotNull Player viewer) {
         final ViewerState state = this.states.get(key(target, viewer));
         if (state != null) {
             state.tracked = false;
-            this.handleStop(target, viewer);
+            this.handleStop(state);
         }
-        this.removeFromHiddenTeam(target, viewer);
+        this.removeFromHiddenTeam(target, viewer, state);
     }
 
     private void invalidateRender(@NotNull ViewerState state) {
@@ -309,8 +302,9 @@ public final class RenderLoop {
         state.pendingAttach = null;
     }
 
-    private void handleRender(@NotNull Player target, @NotNull Player viewer) {
-        final ViewerState state = this.getOrCreate(target, viewer);
+    private void handleRender(@NotNull ViewerState state) {
+        final var target = state.target;
+        final var viewer = state.viewer;
         this.invalidateRender(state);
         state.active = true;
 
@@ -322,7 +316,7 @@ public final class RenderLoop {
 
         if (target == viewer && !viewer.hasPermission("moderntags.see.own")) {
             state.renderer = null;
-            this.removeFromHiddenTeam(target, viewer);
+            this.removeFromHiddenTeam(target, viewer, state);
             return;
         }
 
@@ -331,9 +325,7 @@ public final class RenderLoop {
         this.applyCurrentState(state);
     }
 
-    private void handleStop(@NotNull Player target, @NotNull Player viewer) {
-        final long key = key(target, viewer);
-        final ViewerState state = this.states.get(key);
+    private void handleStop(@Nullable ViewerState state) {
         if (state == null) return;
         this.invalidateRender(state);
         state.active = false;
@@ -345,24 +337,19 @@ public final class RenderLoop {
         state.renderer = null;
     }
 
-    private void handleSuppress(@NotNull RenderTask.SuppressChange s) {
-        final ViewerState state = this.states.get(key(s.target(), s.viewer()));
-        if (state != null) this.applySuppressChange(state, s.reason(), s.add());
+    private void handleSuppress(@NotNull RenderTask.SuppressChange change) {
+        final ViewerState state = this.states.get(key(change.target(), change.viewer()));
+        if (state != null) this.applySuppressChange(state, change.changedMask(), change.values());
     }
 
     /**
      * Core suppress logic, extracted so it can be called directly from
      * {@link #handlePassengers} without posting a task back to the queue.
      */
-    private void applySuppressChange(@NotNull ViewerState state, byte reason, boolean add) {
-        if (add) {
-            if (state.hasSuppress(reason)) return;
-            state.addSuppress(reason);
-        } else {
-            if (!state.hasSuppress(reason)) return;
-            state.removeSuppress(reason);
-        }
-
+    private void applySuppressChange(@NotNull ViewerState state, byte changedMask, byte values) {
+        final byte updatedMask = (byte) ((state.suppressMask & ~changedMask) | (values & changedMask));
+        if (updatedMask == state.suppressMask) return;
+        state.suppressMask = updatedMask;
         this.applyCurrentState(state);
     }
 
@@ -399,8 +386,7 @@ public final class RenderLoop {
 
         if (!state.rendered) {
             this.invalidateRender(state);
-            final boolean legacyClaimsTeam = state.renderer instanceof LegacyRenderer
-                    && this.protocolManager.getChannel(state.viewer.getUniqueId()) != null;
+            final boolean legacyClaimsTeam = state.renderer instanceof LegacyRenderer;
             try {
                 state.renderer.render(state);
             } finally {
@@ -415,12 +401,10 @@ public final class RenderLoop {
         }
     }
 
-    // ── Team packet handling ──────────────────────────────────────────────────
-
     /**
      * Central handler for all intercepted TEAMS packets.
      * <p>
-     * <h3>Processing steps</h3>
+     * <h2>Processing steps</h2>
      * <ol>
      *   <li>For {@code REMOVE}: snapshot the current registry members <em>before</em>
      *       clearing, since the protocol carries no player list for this mode.</li>
@@ -438,7 +422,7 @@ public final class RenderLoop {
      *   </li>
      * </ol>
      *
-     * <h3>Allocation notes</h3>
+     * <h2>Allocation notes</h2>
      * <p>The three classification lists ({@link #reuseModernNames}, {@link #reuseLegacyStates},
      * {@link #reuseUnmanagedNames}) are instance-level buffers. Name lists are cleared here;
      * pair references are released by the task dispatcher after processing, including failures.
@@ -446,103 +430,83 @@ public final class RenderLoop {
      * holds the {@code Set} reference directly, which is safe because {@code REMOVE} in step 3
      * removes the set from the map without modifying its contents.
      */
-    private void handleTeamPacket(@NotNull RenderTask.TeamPacket t) {
-        final int viewerId = t.viewer().getEntityId();
-        final WrapperPlayServerTeams.TeamMode mode = t.mode();
+    private void handleTeamPacket(@NotNull RenderTask.TeamPacket packet) {
+        final int viewerId = packet.viewer().getEntityId();
+        final var mode = packet.mode();
         Map<String, Set<String>> viewerTeams = this.teamRegistry.get(viewerId);
-        final Set<String> sourceMembers = viewerTeams != null ? viewerTeams.get(t.teamName()) : null;
+        final Set<String> sourceMembers = viewerTeams != null ? viewerTeams.get(packet.teamName()) : null;
 
-        // ── Step 1: Resolve affected players ─────────────────────────────────
-        // For REMOVE the protocol sends no player list; read the registry before clearing.
-        // UPDATE has no membership payload, so classify its existing members as well.
-        // Empty CREATE/ADD/REMOVE_ENTITIES must retain their empty membership payload.
-        // Classification reads source membership before the registry is changed.
         final Collection<String> affectedPlayers;
-        if (mode == WrapperPlayServerTeams.TeamMode.REMOVE
-                || mode == WrapperPlayServerTeams.TeamMode.UPDATE && t.players().isEmpty()) {
+        if (mode == TeamMode.REMOVE || mode == TeamMode.UPDATE && packet.players().isEmpty()) {
             affectedPlayers = sourceMembers != null ? sourceMembers : Set.of();
         } else {
-            affectedPlayers = t.players();
+            affectedPlayers = packet.players();
         }
 
-        // ── Step 2: Classify affected players (reusable lists, no per-call allocation) ──
         this.reuseModernNames.clear();
         this.reuseUnmanagedNames.clear();
 
-        for (final String name : affectedPlayers) {
-            final Player target = Bukkit.getPlayerExact(name);
+        for (final var name : affectedPlayers) {
+            final var target = Bukkit.getPlayerExact(name);
             if (target == null) {
                 this.reuseUnmanagedNames.add(name);
                 continue;
             }
-            final ViewerState state = this.states.get(key(target, t.viewer()));
-            if (this.usesModernRenderer(target, t.viewer(), state)) {
+            final ViewerState state = this.states.get(key(target, packet.viewer()));
+            if (this.usesModernRenderer(target, packet.viewer(), state)) {
                 this.reuseModernNames.add(name);
             } else if (state == null || state.renderer == null) {
                 this.reuseUnmanagedNames.add(name);
-            } else if (mode != WrapperPlayServerTeams.TeamMode.REMOVE_ENTITIES
-                    || sourceMembers != null && sourceMembers.contains(name)) {
+            } else if (mode != TeamMode.REMOVE_ENTITIES || sourceMembers != null && sourceMembers.contains(name)) {
                 this.reuseLegacyStates.add(state);
             }
         }
 
-        // ── Step 3: Update team registry ──────────────────────────────────────
         switch (mode) {
             case CREATE, ADD_ENTITIES -> {
-                if (!t.players().isEmpty()) {
+                if (!packet.players().isEmpty()) {
                     if (viewerTeams == null) {
                         viewerTeams = new HashMap<>();
                         this.teamRegistry.put(viewerId, viewerTeams);
                     }
                     final Set<String> members = sourceMembers != null ? sourceMembers
-                            : viewerTeams.computeIfAbsent(t.teamName(), $ -> new HashSet<>());
-                    for (final Set<String> previousMembers : viewerTeams.values()) {
+                            : viewerTeams.computeIfAbsent(packet.teamName(), $ -> new HashSet<>());
+                    for (final var previousMembers : viewerTeams.values()) {
                         if (previousMembers == members) continue;
-                        for (final String name : t.players()) previousMembers.remove(name);
+                        for (final var name : packet.players()) previousMembers.remove(name);
                     }
-                    members.addAll(t.players());
+                    members.addAll(packet.players());
                 }
             }
             case REMOVE_ENTITIES -> {
                 if (sourceMembers != null) {
-                    t.players().forEach(sourceMembers::remove);
-                    if (sourceMembers.isEmpty()) viewerTeams.remove(t.teamName());
+                    packet.players().forEach(sourceMembers::remove);
+                    if (sourceMembers.isEmpty()) viewerTeams.remove(packet.teamName());
                 }
             }
             case REMOVE -> {
-                if (viewerTeams != null) viewerTeams.remove(t.teamName());
+                if (viewerTeams != null) viewerTeams.remove(packet.teamName());
             }
             case UPDATE -> { /* no membership change */ }
         }
 
-        // ── Step 4: Obtain viewer channel ─────────────────────────────────────
-        final Object channel = this.protocolManager.getChannel(t.viewer().getUniqueId());
+        final Object channel = this.protocolManager.getChannel(packet.viewer().getUniqueId());
         if (channel == null) return;
 
-        // ── Step 5: Re-send for ModernRenderer players ────────────────────────
-        this.resendForModernPlayers(t, viewerId, channel, mode, this.reuseModernNames);
+        this.resendForModernPlayers(packet, viewerId, channel, mode, this.reuseModernNames);
 
-        // ── Step 6: Update color for LegacyRenderer players ───────────────────
-        // The packet itself is NOT forwarded — LegacyRenderer owns these teams.
-        // Only the resolved NamedTextColor is persisted (not the full packet wrapper).
-        for (final ViewerState state : this.reuseLegacyStates) {
-            if (mode == WrapperPlayServerTeams.TeamMode.REMOVE
-                    || mode == WrapperPlayServerTeams.TeamMode.REMOVE_ENTITIES) {
-                // Server removed the player from a team → clear stored color so LegacyRenderer
-                // falls back to the frame default color on the next placeholder update.
+        for (final var state : this.reuseLegacyStates) {
+            if (mode == TeamMode.REMOVE || mode == TeamMode.REMOVE_ENTITIES) {
                 state.teamColor = null;
-            } else if (t.info() != null) {
-                // CREATE / UPDATE / ADD_ENTITIES with info → persist only the color field.
-                final Object rawColor = t.info().getColor();
-                state.teamColor = rawColor instanceof NamedTextColor nc ? nc : null;
+            } else if (packet.info() != null) {
+                final Object rawColor = packet.info().getColor();
+                state.teamColor = rawColor instanceof NamedTextColor color ? color : null;
             }
 
-            // Refresh only this viewer so the new (or cleared) color is applied immediately.
             ((LegacyRenderer) state.renderer).updateViewer(state);
         }
 
-        // ── Step 7: Re-send for unmanaged players (and info-only packets) ─────
-        this.resendForUnmanagedPlayers(t, viewerId, channel, mode,
+        this.resendForUnmanagedPlayers(packet, viewerId, channel, mode,
                 this.reuseUnmanagedNames, affectedPlayers.isEmpty());
     }
 
@@ -551,50 +515,49 @@ public final class RenderLoop {
      * Member removals remain suppressed until an add transfers the entry elsewhere.
      */
     private void resendForModernPlayers(
-            @NotNull RenderTask.TeamPacket t,
+            @NotNull RenderTask.TeamPacket packet,
             int viewerId,
             @NotNull Object channel,
-            @NotNull WrapperPlayServerTeams.TeamMode mode,
+            @NotNull TeamMode mode,
             @NotNull List<String> modernPlayers) {
 
-        if (mode == WrapperPlayServerTeams.TeamMode.REMOVE) {
-            // Transfer modern entries before removing the team that hides their names.
-            // REMOVE_ENTITIES may have removed them from the source registry while
-            // the client still retains them, so use actual client membership here.
+        if (mode == TeamMode.REMOVE) {
+            // Transfer actual client members before removing the team that hides their names.
             final ClientTeamView view = this.clientTeams.get(viewerId);
-            final ClientTeam team = view != null ? view.teams.get(t.teamName()) : null;
+            final ClientTeam team = view != null ? view.teams.get(packet.teamName()) : null;
             if (team != null) {
-                for (final String name : List.copyOf(team.members)) {
-                    final Player target = Bukkit.getPlayerExact(name);
-                    if (target == null || target == t.viewer()) continue;
-                    final ViewerState state = this.states.get(key(target, t.viewer()));
-                    if (this.usesModernRenderer(target, t.viewer(), state)) {
-                        this.addToHiddenTeam(target, t.viewer(), channel);
+                // Adding a fallback member also removes it from this team.
+                for (final var name : List.copyOf(team.members)) {
+                    final var target = Bukkit.getPlayerExact(name);
+                    if (target == null || target == packet.viewer()) continue;
+                    final ViewerState state = this.states.get(key(target, packet.viewer()));
+                    if (this.usesModernRenderer(target, packet.viewer(), state)) {
+                        this.addToHiddenTeam(target, packet.viewer(), channel);
                     }
                 }
             }
-            this.sendClientTeam(viewerId, channel, t.teamName(), mode, null, List.of());
+            this.sendClientTeam(viewerId, channel, packet.teamName(), mode, null, List.of());
             return;
         }
         if (modernPlayers.isEmpty()) return;
 
         switch (mode) {
             case CREATE, UPDATE -> {
-                if (t.info() != null) {
-                    this.sendClientTeam(viewerId, channel, t.teamName(), mode,
-                            makeNeverInfo(t.info()), modernPlayers);
+                if (packet.info() != null) {
+                    this.sendClientTeam(viewerId, channel, packet.teamName(), mode,
+                            makeNeverInfo(packet.info()), modernPlayers);
                 }
             }
             case ADD_ENTITIES -> {
                 final ClientTeamView view = this.clientTeams.get(viewerId);
-                final ClientTeam team = view != null ? view.teams.get(t.teamName()) : null;
+                final ClientTeam team = view != null ? view.teams.get(packet.teamName()) : null;
                 if (team == null) return;
                 // An empty or unmanaged CREATE may have forwarded the original visibility.
-                if (team.info.getTagVisibility() != WrapperPlayServerTeams.NameTagVisibility.NEVER) {
-                    this.sendClientTeam(viewerId, channel, t.teamName(),
-                            WrapperPlayServerTeams.TeamMode.UPDATE, makeNeverInfo(team.info), List.of());
+                if (team.info.getTagVisibility() != NameTagVisibility.NEVER) {
+                    this.sendClientTeam(viewerId, channel, packet.teamName(),
+                            TeamMode.UPDATE, makeNeverInfo(team.info), List.of());
                 }
-                this.sendClientTeam(viewerId, channel, t.teamName(), mode, null, modernPlayers);
+                this.sendClientTeam(viewerId, channel, packet.teamName(), mode, null, modernPlayers);
             }
             case REMOVE_ENTITIES -> { /* keep modern targets in their hidden-name team */ }
         }
@@ -613,35 +576,27 @@ public final class RenderLoop {
      * ModernTags and must retain their original {@code nameTagVisibility}.
      */
     private void resendForUnmanagedPlayers(
-            @NotNull RenderTask.TeamPacket t,
+            @NotNull RenderTask.TeamPacket packet,
             int viewerId,
             @NotNull Object channel,
-            @NotNull WrapperPlayServerTeams.TeamMode mode,
+            @NotNull TeamMode mode,
             @NotNull List<String> unmanagedPlayers,
             boolean noAffectedPlayers) {
 
         switch (mode) {
             case CREATE, UPDATE -> {
-                // Re-send if there are unmanaged players, OR if the packet had no players at all
-                // (info-only packet — e.g. TAB sidebar/tab-list display team).
                 if (!unmanagedPlayers.isEmpty() || noAffectedPlayers) {
-                    this.sendClientTeam(viewerId, channel, t.teamName(), mode, t.info(), unmanagedPlayers);
+                    this.sendClientTeam(viewerId, channel, packet.teamName(), mode, packet.info(), unmanagedPlayers);
                 }
             }
             case ADD_ENTITIES, REMOVE_ENTITIES -> {
                 if (!unmanagedPlayers.isEmpty()) {
-                    this.sendClientTeam(viewerId, channel, t.teamName(), mode, null, unmanagedPlayers);
+                    this.sendClientTeam(viewerId, channel, packet.teamName(), mode, null, unmanagedPlayers);
                 }
             }
             case REMOVE -> {
-                // Forward REMOVE if:
-                //  a) There were unmanaged members in this team (we forwarded their CREATE), OR
-                //  b) The original packet had no affected players at all (empty-player-list team
-                //     whose CREATE we forwarded verbatim in a previous packet).
-                //
-                // The shared sender also prevents a second REMOVE after the modern path sent it.
                 if (!unmanagedPlayers.isEmpty() || noAffectedPlayers) {
-                    this.sendClientTeam(viewerId, channel, t.teamName(), mode, null, List.of());
+                    this.sendClientTeam(viewerId, channel, packet.teamName(), mode, null, List.of());
                 }
             }
         }
@@ -652,35 +607,33 @@ public final class RenderLoop {
      * In particular, REMOVE_ENTITIES is valid only for entries still in that exact team.
      */
     private void sendClientTeam(int viewerId, @NotNull Object channel, @NotNull String name,
-                                @NotNull WrapperPlayServerTeams.TeamMode mode,
-                                @Nullable WrapperPlayServerTeams.ScoreBoardTeamInfo info,
+                                @NotNull TeamMode mode,
+                                @Nullable ScoreBoardTeamInfo info,
                                 @NotNull List<String> players) {
         ClientTeamView view = this.clientTeams.get(viewerId);
         ClientTeam team = view != null ? view.teams.get(name) : null;
         switch (mode) {
             case CREATE, UPDATE -> {
                 if (info == null) return;
-                final boolean create = team == null;
-                this.sendTeam(channel, name, create
-                                ? WrapperPlayServerTeams.TeamMode.CREATE : WrapperPlayServerTeams.TeamMode.UPDATE,
-                        info, create ? players : List.of());
-                if (view == null) {
-                    view = new ClientTeamView();
-                    this.clientTeams.put(viewerId, view);
-                }
-                if (create) {
+                if (team == null) {
+                    this.sendTeam(channel, name, TeamMode.CREATE, info, players);
+                    if (view == null) {
+                        view = new ClientTeamView();
+                        this.clientTeams.put(viewerId, view);
+                    }
                     team = new ClientTeam(info);
                     view.teams.put(name, team);
-                } else {
-                    team.info = info;
-                }
-                // UPDATE carries no members: a repeated CREATE needs a separate ADD.
-                if (create || mode == WrapperPlayServerTeams.TeamMode.CREATE) {
-                    if (!create && !players.isEmpty()) {
-                        this.sendTeam(channel, name, WrapperPlayServerTeams.TeamMode.ADD_ENTITIES, null, players);
-                    }
                     this.addClientMembers(view, team, players);
+                    return;
                 }
+
+                this.sendTeam(channel, name, TeamMode.UPDATE, info, List.of());
+                team.info = info;
+                if (mode == TeamMode.UPDATE || players.isEmpty()) return;
+
+                // UPDATE carries no members: a repeated CREATE needs a separate ADD.
+                this.sendTeam(channel, name, TeamMode.ADD_ENTITIES, null, players);
+                this.addClientMembers(view, team, players);
             }
             case ADD_ENTITIES -> {
                 if (team == null || players.isEmpty()) return;
@@ -690,14 +643,14 @@ public final class RenderLoop {
             case REMOVE_ENTITIES -> {
                 if (team == null || players.isEmpty()) return;
                 final Set<String> removals = new LinkedHashSet<>(players.size());
-                for (final String player : players) {
+                for (final var player : players) {
                     if (view.memberships.get(player) == team) {
                         removals.add(player);
                     }
                 }
                 if (removals.isEmpty()) return;
                 this.sendTeam(channel, name, mode, null, removals);
-                for (final String player : removals) {
+                for (final var player : removals) {
                     view.memberships.remove(player);
                     team.members.remove(player);
                 }
@@ -707,7 +660,7 @@ public final class RenderLoop {
                 this.sendTeam(channel, name, mode, null, null);
                 view.teams.remove(name);
                 if (name.equals(view.hiddenTeamName)) view.hiddenTeamName = null;
-                for (final String member : team.members) {
+                for (final var member : team.members) {
                     view.memberships.remove(member, team);
                 }
             }
@@ -716,7 +669,7 @@ public final class RenderLoop {
 
     private void addClientMembers(@NotNull ClientTeamView view, @NotNull ClientTeam team,
                                   @NotNull List<String> members) {
-        for (final String member : members) {
+        for (final var member : members) {
             final ClientTeam previous = view.memberships.put(member, team);
             if (previous != null && previous != team) previous.members.remove(member);
             team.members.add(member);
@@ -736,15 +689,13 @@ public final class RenderLoop {
      */
     private void updateNameHiding(@NotNull ViewerState state) {
         if (!(state.renderer instanceof ModernRenderer) || state.target == state.viewer) {
-            this.removeFromHiddenTeam(state.target, state.viewer);
+            this.removeFromHiddenTeam(state.target, state.viewer, state);
             return;
         }
-        final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
-        if (channel == null) return;
         final int viewerId = state.viewer.getEntityId();
         final ClientTeamView view = this.clientTeams.get(viewerId);
         final ClientTeam team = view != null ? view.memberships.get(state.target.getName()) : null;
-        if (team == null) this.addToHiddenTeam(state.target, state.viewer, channel);
+        if (team == null) this.addToHiddenTeam(state.target, state.viewer, state.channel);
     }
 
     private void addToHiddenTeam(@NotNull Player target, @NotNull Player viewer, @NotNull Object channel) {
@@ -757,25 +708,27 @@ public final class RenderLoop {
                 name = HIDDEN_TEAM_PREFIX + suffix++;
             } while (view.teams.containsKey(name));
             this.sendClientTeam(viewerId, channel, name,
-                    WrapperPlayServerTeams.TeamMode.CREATE, HIDDEN_TEAM_INFO, List.of(target.getName()));
+                    TeamMode.CREATE, HIDDEN_TEAM_INFO, List.of(target.getName()));
             view.hiddenTeamName = name;
         } else {
             this.sendClientTeam(viewerId, channel, view.hiddenTeamName,
-                    WrapperPlayServerTeams.TeamMode.ADD_ENTITIES, null, List.of(target.getName()));
+                    TeamMode.ADD_ENTITIES, null, List.of(target.getName()));
         }
     }
 
-    private void removeFromHiddenTeam(@NotNull Player target, @NotNull Player viewer) {
+    private void removeFromHiddenTeam(@NotNull Player target, @NotNull Player viewer,
+                                      @Nullable ViewerState state) {
         final ClientTeamView view = this.clientTeams.get(viewer.getEntityId());
         if (view == null || view.hiddenTeamName == null) return;
-        final Object channel = this.protocolManager.getChannel(viewer.getUniqueId());
+        final Object channel = state != null ? state.channel
+                : this.protocolManager.getChannel(viewer.getUniqueId());
         if (channel == null) return;
         final String name = view.hiddenTeamName;
         this.sendClientTeam(viewer.getEntityId(), channel, name,
-                WrapperPlayServerTeams.TeamMode.REMOVE_ENTITIES, null, List.of(target.getName()));
+                TeamMode.REMOVE_ENTITIES, null, List.of(target.getName()));
         if (view.teams.get(name).members.isEmpty()) {
             this.sendClientTeam(viewer.getEntityId(), channel, name,
-                    WrapperPlayServerTeams.TeamMode.REMOVE, null, List.of());
+                    TeamMode.REMOVE, null, List.of());
         }
     }
 
@@ -794,127 +747,106 @@ public final class RenderLoop {
 
     private static final class ClientTeam {
 
-        private WrapperPlayServerTeams.ScoreBoardTeamInfo info;
+        private ScoreBoardTeamInfo info;
         private final Set<String> members = new HashSet<>();
 
-        private ClientTeam(@NotNull WrapperPlayServerTeams.ScoreBoardTeamInfo info) {
+        private ClientTeam(@NotNull ScoreBoardTeamInfo info) {
             this.info = info;
         }
     }
 
-    // ── Remaining handlers ────────────────────────────────────────────────────
+    private void handlePassengers(@NotNull RenderTask.PassengersUpdate update) {
+        final ViewerState state = this.states.get(key(update.target(), update.viewer()));
 
-    private void handlePassengers(@NotNull RenderTask.PassengersUpdate p) {
-        final ViewerState state = this.states.get(key(p.target(), p.viewer()));
-
-        final Object channel = this.protocolManager.getChannel(p.viewer().getUniqueId());
+        final Object channel = state != null ? state.channel
+                : this.protocolManager.getChannel(update.viewer().getUniqueId());
         if (channel == null) return;
 
+        int[] passengers = update.incomingPassengers();
         if (this.hideTagWhenHasPassenger) {
-            // Call directly instead of posting back to the queue — we are already inside
-            // drain, so re-posting would add unnecessary queue overhead and one extra object
-            // allocation (RenderTask.SuppressChange record).
-            final boolean hasReal = p.incomingPassengers().length > 0;
-            if (state != null) this.applySuppressChange(state, ViewerState.SUPPRESS_PASSENGER, hasReal);
-            this.sendPassengers(channel, p.target().getEntityId(), p.incomingPassengers());
-            return;
+            final boolean hasPassengers = passengers.length > 0;
+            if (state != null) this.applySuppressChange(state, ViewerState.SUPPRESS_PASSENGER,
+                    hasPassengers ? ViewerState.SUPPRESS_PASSENGER : (byte) 0);
+        } else if (state != null && state.renderer instanceof ModernRenderer modern) {
+            final int[] tagPassengers = modern.ownedPassengerIds(state);
+            if (tagPassengers.length > 0) {
+                final int[] merged = new int[passengers.length + tagPassengers.length];
+                System.arraycopy(passengers, 0, merged, 0, passengers.length);
+                System.arraycopy(tagPassengers, 0, merged, passengers.length, tagPassengers.length);
+                passengers = merged;
+            }
         }
 
-        if (!(state != null && state.renderer instanceof ModernRenderer modern)) {
-            this.sendPassengers(channel, p.target().getEntityId(), p.incomingPassengers());
-            return;
-        }
-
-        final int[] ownedIds = modern.ownedPassengerIds(state);
-        if (ownedIds.length == 0) {
-            this.sendPassengers(channel, p.target().getEntityId(), p.incomingPassengers());
-            return;
-        }
-
-        // Merge renderer-owned passenger IDs into the incoming list before forwarding.
-        final int[] merged = new int[p.incomingPassengers().length + ownedIds.length];
-        System.arraycopy(p.incomingPassengers(), 0, merged, 0, p.incomingPassengers().length);
-        System.arraycopy(ownedIds, 0, merged, p.incomingPassengers().length, ownedIds.length);
-        this.sendPassengers(channel, p.target().getEntityId(), merged);
+        this.sendPassengers(channel, update.target().getEntityId(), passengers);
     }
 
     private void handleCleanup(@NotNull Player player) {
         final int playerId = player.getEntityId();
 
-        // ── Viewer side: remove all (target → player) states via viewer index ─
-        final LongArrayList viewerKeys = this.viewerIndex.remove(playerId);
+        final LongList viewerKeys = this.viewerIndex.remove(playerId);
         if (viewerKeys != null) {
             for (int i = 0; i < viewerKeys.size(); i++) {
-                final long k = viewerKeys.getLong(i);
-                final ViewerState st = this.states.remove(k);
-                if (st != null && st.rendered && st.renderer != null) {
-                    st.renderer.stopRendering(st);
-                }
-                // Keep the target index consistent.
-                final int tid = (int) (k >>> 32);
-                final LongArrayList tkeys = this.targetIndex.get(tid);
-                if (tkeys != null) tkeys.rem(k);
+                final long key = viewerKeys.getLong(i);
+                this.removePair(key, this.targetIndex, (int) (key >>> 32));
             }
         }
 
-        // ── Target side: remove all (player → viewer) states via target index ─
-        // Previously required an O(n) full-map scan; now O(viewers) via targetIndex.
-        final LongArrayList targetKeys = this.targetIndex.remove(playerId);
+        final LongList targetKeys = this.targetIndex.remove(playerId);
         if (targetKeys != null) {
             for (int i = 0; i < targetKeys.size(); i++) {
-                final long k = targetKeys.getLong(i);
-                final ViewerState st = this.states.remove(k);
-                if (st != null && st.rendered && st.renderer != null) {
-                    st.renderer.stopRendering(st);
-                }
-                // Keep the viewer index consistent.
-                final int vid = (int) k;
-                final LongArrayList vkeys = this.viewerIndex.get(vid);
-                if (vkeys != null) vkeys.rem(k);
+                final long key = targetKeys.getLong(i);
+                this.removePair(key, this.viewerIndex, (int) key);
             }
         }
 
-        // Delegate renderer-level cleanup (frame state, objective cache, etc.).
-        for (final TagGroup group : this.groups) {
-            for (final TagEntry entry : group.entries()) {
+        for (final var group : this.groups) {
+            for (final var entry : group.entries()) {
                 entry.modernRenderer().cleanup(player);
                 entry.legacyRenderer().cleanup(player);
             }
         }
 
-        // Remove all team-registry and forwarding-tracker entries for this viewer.
         this.teamRegistry.remove(playerId);
         this.clientTeams.remove(playerId);
 
         // Fallback teams can outlive ViewerState during reload or after death.
-        for (final Player viewer : Bukkit.getOnlinePlayers()) {
-            this.removeFromHiddenTeam(player, viewer);
+        for (final var viewer : Bukkit.getOnlinePlayers()) {
+            this.removeFromHiddenTeam(player, viewer, null);
         }
 
-        // Also scrub the player's name from every other viewer's registry entries
-        // to avoid stale lookups if the player rejoins with the same name.
         final String leavingName = player.getName();
-        for (final Map<String, Set<String>> teams : this.teamRegistry.values()) {
-            for (final Set<String> members : teams.values()) {
+        for (final var teams : this.teamRegistry.values()) {
+            for (final var members : teams.values()) {
                 members.remove(leavingName);
             }
         }
     }
 
+    private void removePair(long key, Int2ObjectMap<LongList> otherIndex, int otherId) {
+        final ViewerState state = this.states.remove(key);
+        if (state != null && state.rendered && state.renderer != null) {
+            state.renderer.stopRendering(state);
+        }
+
+        final LongList keys = otherIndex.get(otherId);
+        if (keys != null) keys.rem(key);
+    }
+
     @SuppressWarnings("deprecation")
     private void handleInitializeAll() {
-        for (final Player target : Bukkit.getOnlinePlayers()) {
+        for (final var target : Bukkit.getOnlinePlayers()) {
             // The entity tracker excludes the target itself; preserve permission-gated own tags.
-            this.handleRender(target, target);
-            for (final Player viewer : target.getTrackedPlayers()) {
-                this.getOrCreate(target, viewer).tracked = true;
-                this.handleRender(target, viewer);
+            this.handleRender(this.getOrCreate(target, target));
+            for (final var viewer : target.getTrackedPlayers()) {
+                final var state = this.getOrCreate(target, viewer);
+                state.tracked = true;
+                this.handleRender(state);
             }
         }
     }
 
     private void handleInvalidateAll(boolean shutdown) {
-        for (final ViewerState state : this.states.values()) {
+        for (final var state : this.states.values()) {
             if (state.renderer != null && this.needsTeardown(state)) {
                 state.renderer.stopRendering(state);
                 state.rendered = false;
@@ -926,12 +858,14 @@ public final class RenderLoop {
         this.tickSeen.clear();
         // Keep name hiding during reload; remove our fallback teams when disabling the plugin.
         if (shutdown) {
-            for (final Player viewer : Bukkit.getOnlinePlayers()) {
-                final ClientTeamView view = this.clientTeams.get(viewer.getEntityId());
+            for (final var viewer : Bukkit.getOnlinePlayers()) {
+                final int viewerId = viewer.getEntityId();
+                final ClientTeamView view = this.clientTeams.get(viewerId);
+                if (view == null || view.hiddenTeamName == null) continue;
                 final Object channel = this.protocolManager.getChannel(viewer.getUniqueId());
-                if (view != null && view.hiddenTeamName != null && channel != null) {
-                    this.sendClientTeam(viewer.getEntityId(), channel, view.hiddenTeamName,
-                            WrapperPlayServerTeams.TeamMode.REMOVE, null, List.of());
+                if (channel != null) {
+                    this.sendClientTeam(viewerId, channel, view.hiddenTeamName,
+                            TeamMode.REMOVE, null, List.of());
                 }
             }
             this.clientTeams.clear();
@@ -946,7 +880,7 @@ public final class RenderLoop {
     }
 
     private void recheckConditions() {
-        for (final ViewerState state : this.states.values()) {
+        for (final var state : this.states.values()) {
             if (!state.active) continue;
 
             final TagRenderer renderer = state.target == state.viewer
@@ -973,7 +907,7 @@ public final class RenderLoop {
 
         // Advance each target once per renderer, regardless of its viewer count.
         try {
-            for (final ViewerState state : this.states.values()) {
+            for (final var state : this.states.values()) {
                 // Recover ready callbacks even if their queue offer was dropped during a burst.
                 if (state.pendingSpawn != null && state.pendingSpawn.ready().get()) {
                     this.handleRenderWhenCurrent(state.pendingSpawn);
@@ -997,30 +931,28 @@ public final class RenderLoop {
                 }
             }
         } finally {
-            for (final Set<Player> targets : this.tickSeen.values()) {
+            for (final var targets : this.tickSeen.values()) {
                 targets.clear();
             }
         }
     }
 
-    // ── State access (drain-only) ─────────────────────────────────────────────
-
     @NotNull
     private ViewerState getOrCreate(@NotNull Player target, @NotNull Player viewer) {
-        final long k = key(target, viewer);
-        ViewerState state = this.states.get(k);
+        final long stateKey = key(target, viewer);
+        ViewerState state = this.states.get(stateKey);
         if (state == null) {
             state = new ViewerState(target, viewer);
             if (target.isInvisible()) {
                 state.addSuppress(ViewerState.SUPPRESS_INVISIBLE);
             }
-            this.states.put(k, state);
+            this.states.put(stateKey, state);
             this.viewerIndex
                     .computeIfAbsent(viewer.getEntityId(), id -> new LongArrayList(4))
-                    .add(k);
+                    .add(stateKey);
             this.targetIndex
                     .computeIfAbsent(target.getEntityId(), id -> new LongArrayList(4))
-                    .add(k);
+                    .add(stateKey);
         }
         return state;
     }
@@ -1030,16 +962,15 @@ public final class RenderLoop {
         return this.states.get(key(target, viewer));
     }
 
-    // ── Renderer resolution ───────────────────────────────────────────────────
-
     @Nullable
     private TagRenderer resolveRenderer(@NotNull Player target, @NotNull Player viewer) {
-        final Context ownerCtx = new Context(target);
-        for (final TagGroup group : this.groups) {
-            if (!group.passCondition(ownerCtx)) continue;
-            final Context viewerCtx = new Context(viewer);
-            for (final TagEntry entry : group.entries()) {
-                if (entry.passCondition(viewerCtx)) {
+        if (this.groups.isEmpty()) return null;
+        final var targetContext = new Context(target);
+        for (final var group : this.groups) {
+            if (!group.passCondition(targetContext)) continue;
+            final var viewerContext = new Context(viewer);
+            for (final var entry : group.entries()) {
+                if (entry.passCondition(viewerContext)) {
                     return entry.rendererFor(viewer);
                 }
             }
@@ -1047,19 +978,16 @@ public final class RenderLoop {
         return null;
     }
 
-    // ── Packet helpers ────────────────────────────────────────────────────────
-
     /**
      * Builds a new {@link WrapperPlayServerTeams.ScoreBoardTeamInfo} identical to {@code original}
      * except with {@code nameTagVisibility} forced to {@code NEVER}.
      */
-    private static WrapperPlayServerTeams.ScoreBoardTeamInfo makeNeverInfo(
-            @NotNull WrapperPlayServerTeams.ScoreBoardTeamInfo original) {
-        return new WrapperPlayServerTeams.ScoreBoardTeamInfo(
+    private static ScoreBoardTeamInfo makeNeverInfo(@NotNull ScoreBoardTeamInfo original) {
+        return new ScoreBoardTeamInfo(
                 original.getDisplayName(),
                 original.getPrefix(),
                 original.getSuffix(),
-                WrapperPlayServerTeams.NameTagVisibility.NEVER,
+                NameTagVisibility.NEVER,
                 original.getCollisionRule(),
                 original.getColor(),
                 original.getOptionData()
@@ -1067,19 +995,17 @@ public final class RenderLoop {
     }
 
     private void sendTeam(@NotNull Object channel, @NotNull String name,
-                          @NotNull WrapperPlayServerTeams.TeamMode mode,
-                          @Nullable WrapperPlayServerTeams.ScoreBoardTeamInfo info,
+                          @NotNull TeamMode mode,
+                          @Nullable ScoreBoardTeamInfo info,
                           @Nullable Collection<String> players) {
         this.protocolManager.sendPacketSilently(channel, new WrapperPlayServerTeams(name, mode, info, players));
     }
 
     private void sendPassengers(@NotNull Object channel, int vehicleEntityId, int @NotNull [] passengers) {
         this.protocolManager.sendPacketSilently(channel,
-                new com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers(
+                new WrapperPlayServerSetPassengers(
                         vehicleEntityId, passengers));
     }
-
-    // ── Key encoding ──────────────────────────────────────────────────────────
 
     private static long key(@NotNull Player target, @NotNull Player viewer) {
         return ((long) target.getEntityId() << 32) | (viewer.getEntityId() & 0xFFFFFFFFL);

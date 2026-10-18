@@ -126,8 +126,6 @@ public final class ConfigValues {
         return this.tags;
     }
 
-    // ── Settings ──────────────────────────────────────────────────────────────
-
     private void loadSettings(Config root) {
         this.checkForUpdates = root.boolOr("updates.check", true);
         this.autoDownloadUpdates = root.boolOr("updates.auto-download", false);
@@ -138,55 +136,53 @@ public final class ConfigValues {
         if (this.conditionsRecheckRate != -1 && this.conditionsRecheckRate <= 0) {
             throw new IllegalArgumentException("conditions-recheck-rate must be -1 or a positive integer");
         }
-        final String belowNameValue = root.findStr("legacy-general.below-name-value");
+        final var belowNameValue = root.findStr("legacy-general.below-name-value");
         this.belowNameValueParser = belowNameValue.equals("owner:health")
                 ? (target, viewer) -> NumberUtils.healthToInt(target.getHealth())
                 : this.textResolver.intFromPlaceholder(belowNameValue);
         this.belowNameChar = Text.of(root.findStr("legacy-general.below-name-text")).render();
     }
 
-    // ── Tag groups ────────────────────────────────────────────────────────────
-
     private void loadNameTags(Config root) {
         final Map<String, Config> configCache = new HashMap<>();
-        final List<Config> groupSections = root.findSectionList("tags");
+        final var groupSections = root.findSectionList("tags");
 
-        final ImmutableList.Builder<TagGroup> builder = ImmutableList.builder();
+        final var groupsBuilder = ImmutableList.<TagGroup>builder();
         for (int i = 0; i < groupSections.size(); i++) {
             try {
-                builder.add(this.parseGroup(configCache, groupSections.get(i), i));
+                groupsBuilder.add(this.parseGroup(configCache, groupSections.get(i), i));
             } catch (Exception ex) {
                 throw new RuntimeException(
                         "[ModernTags] Failed to parse tag group #" + i + " in config.yml (tags[" + i + "])", ex);
             }
         }
 
-        this.tags = builder.build().stream()
+        this.tags = groupsBuilder.build().stream()
                 .sorted(Comparator.comparing(TagGroup::priority).reversed())
                 .collect(ImmutableList.toImmutableList());
     }
 
-    private TagGroup parseGroup(Map<String, Config> configCache, Config section, int groupIndex) {
+    private TagGroup parseGroup(Map<String, Config> configCache, Config section, int groupIdx) {
         final int priority = section.findInt("priority");
-        final String context = "tags[" + groupIndex + "] (priority=" + priority + ")";
+        final String context = "tags[" + groupIdx + "] (priority=" + priority + ")";
 
-        final Condition condition = this.parseCondition(
+        final var condition = this.parseCondition(
                 section.strOr("owner-conditions", null),
                 context + ".owner-conditions"
         );
 
-        final List<Config> entrySections = section.findSectionList("entries");
-        final ImmutableList.Builder<TagEntry> builder = ImmutableList.builder();
+        final var entrySections = section.findSectionList("entries");
+        final var entriesBuilder = ImmutableList.<TagEntry>builder();
         for (int i = 0; i < entrySections.size(); i++) {
             try {
-                builder.add(this.parseEntry(configCache, entrySections.get(i), context, i));
+                entriesBuilder.add(this.parseEntry(configCache, entrySections.get(i), context, i));
             } catch (Exception ex) {
                 throw new RuntimeException(
                         "[ModernTags] Failed to parse entry #" + i + " in " + context, ex);
             }
         }
 
-        final List<TagEntry> entries = builder.build().stream()
+        final var entries = entriesBuilder.build().stream()
                 .sorted(Comparator.comparing(TagEntry::priority).reversed())
                 .collect(ImmutableList.toImmutableList());
 
@@ -196,31 +192,29 @@ public final class ConfigValues {
     private TagEntry parseEntry(Map<String, Config> configCache,
                                 Config section,
                                 String groupContext,
-                                int entryIndex) {
+                                int entryIdx) {
         final int priority = section.findInt("priority");
-        final String context = groupContext + ".entries[" + entryIndex + "] (priority=" + priority + ")";
+        final String context = groupContext + ".entries[" + entryIdx + "] (priority=" + priority + ")";
 
-        final Condition condition = this.parseCondition(
+        final var condition = this.parseCondition(
                 section.strOr("viewer-conditions", null),
                 context + ".viewer-conditions"
         );
 
-        final Config modernNode = loadNode(configCache, section.findStr("modern"), context);
-        final Config legacyNode = loadNode(configCache, section.findStr("legacy"), context);
+        final var modernNode = this.loadNode(configCache, section.findStr("modern"), context);
+        final var legacyNode = this.loadNode(configCache, section.findStr("legacy"), context);
 
-        final ModernRenderer modern = this.buildModernRenderer(modernNode, context);
-        final LegacyRenderer legacy = this.buildLegacyRenderer(legacyNode, context);
+        final var modern = this.buildModernRenderer(modernNode, context);
+        final var legacy = this.buildLegacyRenderer(legacyNode, context);
 
         return new TagEntry(priority, condition, modern, legacy);
     }
 
     private Config loadNode(Map<String, Config> configCache, String rawPath, String context) {
-        final String[] parts = this.splitPath(rawPath, context);
-        final Config fileRoot = this.loadFile(configCache, parts[0], context);
-        return this.resolveSection(fileRoot, parts[0], parts[1], context);
+        final var pathParts = this.splitPath(rawPath, context);
+        final var fileRoot = this.loadFile(configCache, pathParts[0], context);
+        return this.resolveSection(fileRoot, pathParts[0], pathParts[1], context);
     }
-
-    // ── Renderer builders ─────────────────────────────────────────────────────
 
     private ModernRenderer buildModernRenderer(Config node, String context) {
         try {
@@ -237,8 +231,6 @@ public final class ConfigValues {
             throw new RuntimeException("[ModernTags] Failed to build LegacyRenderer at " + context, ex);
         }
     }
-
-    // ── Path helpers ──────────────────────────────────────────────────────────
 
     @Nullable
     private Condition parseCondition(@Nullable String raw, String context) {
@@ -279,7 +271,7 @@ public final class ConfigValues {
         }
         if (section.equals("<root>")) return fileRoot;
 
-        final Config sectionConfig = fileRoot.sectionOr(section, null);
+        final var sectionConfig = fileRoot.sectionOr(section, null);
         if (sectionConfig == null) {
             throw new IllegalArgumentException(
                     "[ModernTags] Section \"" + section + "\" not found in file \""

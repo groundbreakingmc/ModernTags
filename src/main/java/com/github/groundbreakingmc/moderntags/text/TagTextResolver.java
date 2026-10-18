@@ -54,7 +54,7 @@ public final class TagTextResolver {
      */
     public @NotNull Text<ViewerState> compile(@NotNull String pattern) {
         return Text.cacheableOf(pattern, key -> {
-            final BiFunction<Player, Player, Component> provider = this.bind(key);
+            final var provider = this.bind(key);
             return (state, value) -> value.component(provider.apply(state.target, state.viewer));
         });
     }
@@ -76,11 +76,11 @@ public final class TagTextResolver {
      * @return {@code ToIntBiFunction<target, viewer>}
      */
     public @NotNull ToIntBiFunction<Player, Player> intFromPlaceholder(@NotNull String pattern) {
-        if (pattern.isEmpty()) return (t, v) -> 0;
+        if (pattern.isEmpty()) return (target, viewer) -> 0;
 
-        final BiFunction<Player, Player, Component> provider = this.bind(pattern);
+        final var provider = this.bind(pattern);
         return (target, viewer) -> {
-            final Component component = provider.apply(target, viewer);
+            final var component = provider.apply(target, viewer);
             if (component == null) return 0;
             final String raw = PlainTextComponentSerializer.plainText().serialize(component).trim();
             try {
@@ -116,26 +116,25 @@ public final class TagTextResolver {
 
                 if (key.startsWith("rel:")) {
                     final String relationalKey = key.substring(4);
-                    final int sep = relationalKey.indexOf('_');
-                    if (sep == -1) yield (owner, viewer) -> null;
-                    final String identifier = relationalKey.substring(0, sep);
-                    final String params = relationalKey.substring(sep + 1);
+                    final int sepIdx = relationalKey.indexOf('_');
+                    if (sepIdx == -1) yield (owner, viewer) -> null;
+                    final String identifier = relationalKey.substring(0, sepIdx);
+                    final String params = relationalKey.substring(sepIdx + 1);
                     yield (owner, viewer) -> this.relationalComponent(viewer, owner, identifier, params);
                 }
 
+                final var fallback = Component.text('{' + key + '}');
                 yield (owner, viewer) -> {
                     this.logger.warning(
                             "Unknown placeholder '" + key + "'. " +
                                     "If this is intended to be plain text and not a placeholder, " +
                                     "escape it using '\\'."
                     );
-                    return Component.text('{' + key + '}');
+                    return fallback;
                 };
             }
         };
     }
-
-    // ── Vault ─────────────────────────────────────────────────────────────────
 
     private @Nullable Component vaultComponent(@NotNull Player player, boolean prefix) {
         if (!this.supportsVault || this.chat == null) return null;
@@ -151,22 +150,16 @@ public final class TagTextResolver {
                 : LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
     }
 
-    // ── PlaceholderAPI ────────────────────────────────────────────────────────
-
     private @NotNull BiFunction<Player, Player, Component> bindPapi(@NotNull String key, boolean viewerContext) {
-        final int sep = key.indexOf('_');
-        final String identifier = sep != -1 ? key.substring(0, sep) : key;
-        final String params = sep != -1 ? key.substring(sep + 1) : "";
+        final int sepIdx = key.indexOf('_');
+        final String identifier = sepIdx != -1 ? key.substring(0, sepIdx) : key;
+        final String params = sepIdx != -1 ? key.substring(sepIdx + 1) : "";
         return (owner, viewer) -> this.papiComponent(viewerContext ? viewer : owner, identifier, params);
     }
 
     private @Nullable Component papiComponent(@NotNull Player player, @NotNull String identifier,
                                               @NotNull String params) {
-        if (!this.supportsPapi) return null;
-
-        final PlaceholderExpansion expansion = PlaceholderAPIPlugin.getInstance()
-                .getLocalExpansionManager()
-                .getExpansion(identifier);
+        final var expansion = this.findExpansion(identifier);
 
         if (expansion == null) return null;
 
@@ -180,11 +173,7 @@ public final class TagTextResolver {
             @NotNull String identifier,
             @NotNull String params
     ) {
-        if (!this.supportsPapi) return null;
-
-        final PlaceholderExpansion expansion = PlaceholderAPIPlugin.getInstance()
-                .getLocalExpansionManager()
-                .getExpansion(identifier);
+        final var expansion = this.findExpansion(identifier);
 
         if (!(expansion instanceof Relational relational)) return null;
 
@@ -194,7 +183,11 @@ public final class TagTextResolver {
         return result != null ? Component.text(result) : null;
     }
 
-    // ── Setters ───────────────────────────────────────────────────────────────
+    private @Nullable PlaceholderExpansion findExpansion(@NotNull String identifier) {
+        if (!this.supportsPapi) return null;
+        // Keep the lookup at render time so changes to registered expansions take effect.
+        return PlaceholderAPIPlugin.getInstance().getLocalExpansionManager().getExpansion(identifier);
+    }
 
     public void chat(@Nullable Chat chat) {
         this.chat = chat;

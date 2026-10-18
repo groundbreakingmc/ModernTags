@@ -22,39 +22,39 @@ public abstract class AbstractNumberCondition implements Condition {
 
     @Override
     public boolean test(@NotNull Context context) {
-        final Number leftVal = this.toNumber(this.left.value(context), "left");
-        final Number rightVal = this.toNumber(this.right.value(context), "right");
-        return this.compare(leftVal, rightVal);
+        final var leftValue = this.toNumber(this.left.value(context), "left");
+        final var rightValue = this.toNumber(this.right.value(context), "right");
+        return this.compare(leftValue, rightValue);
     }
 
     protected abstract boolean compare(Number left, Number right);
 
-    protected Number toNumber(Object obj, String side) {
-        if (obj instanceof Number number) {
+    protected Number toNumber(Object value, String side) {
+        if (value instanceof Number number) {
             return number;
         }
 
-        if (obj instanceof Boolean bool) {
-            return bool ? 1 : 0;
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue ? 1 : 0;
         }
 
-        if (obj instanceof String str) {
+        if (value instanceof String text) {
             try {
-                return Double.parseDouble(str);
+                return Double.parseDouble(text);
             } catch (NumberFormatException ignored) {
             }
 
-            if ("true".equalsIgnoreCase(str)) {
+            if ("true".equalsIgnoreCase(text)) {
                 return 1;
             }
-            if ("false".equalsIgnoreCase(str)) {
+            if ("false".equalsIgnoreCase(text)) {
                 return 0;
             }
         }
 
         throw new IllegalStateException(
                 "Unsupported value type on " + side + ": "
-                        + obj.getClass().getName()
+                        + value.getClass().getName()
         );
     }
 }

@@ -17,7 +17,6 @@ import com.github.retrooper.packetevents.event.PacketListenerCommon;
 import net.milkbowl.vault.chat.Chat;
 import org.bstats.bukkit.Metrics;
 import org.bukkit.Bukkit;
-import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -67,7 +66,7 @@ public final class ModernTags extends JavaPlugin {
 
         super.getServer().getPluginManager().registerEvents(new BukkitListener(this.renderLoop), this);
 
-        final UpdatesChecker updatesChecker = new UpdatesChecker(this,
+        final var updatesChecker = new UpdatesChecker(this,
                 "https://raw.githubusercontent.com/groundbreakingmc/ModernTags/main/update.txt",
                 !this.configValues.autoDownloadUpdates() ? "/moderntags update" : "");
         this.getCommand("moderntags").setExecutor(new ModernTagsCommand(this, updatesChecker));
@@ -78,9 +77,9 @@ public final class ModernTags extends JavaPlugin {
 
         // Resolve Vault async — services may not be registered yet at this point.
         Bukkit.getAsyncScheduler().runNow(this, task -> {
-            final RegisteredServiceProvider<Chat> reg =
+            final var chatRegistration =
                     getServer().getServicesManager().getRegistration(Chat.class);
-            if (reg != null) this.tagTextResolver.chat(reg.getProvider());
+            if (chatRegistration != null) this.tagTextResolver.chat(chatRegistration.getProvider());
         });
 
         this.metrics = new Metrics(this, 34701);
@@ -110,7 +109,7 @@ public final class ModernTags extends JavaPlugin {
 
     @Override
     public void saveDefaultConfig() {
-        final File configFile = new File(getDataFolder(), "config.yml");
+        final var configFile = new File(getDataFolder(), "config.yml");
         if (!configFile.exists()) {
             saveResource("config.yml", false);
             saveResource("tags/default.yml", false);

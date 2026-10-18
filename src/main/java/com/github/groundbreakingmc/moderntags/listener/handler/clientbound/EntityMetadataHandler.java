@@ -6,7 +6,6 @@ import com.github.groundbreakingmc.moderntags.core.ViewerState;
 import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
 import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
-import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
 import com.github.retrooper.packetevents.protocol.entity.pose.EntityPose;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
@@ -49,26 +48,27 @@ public final class EntityMetadataHandler implements ClientBoundPacketHandler {
         final Player viewer = event.getPlayer();
         if (viewer.getEntityId() == packet.getEntityId()) return;
 
-        final Player target = PlayerLookup.playerById(packet.getEntityId());
+        byte changedMask = 0;
+        byte values = 0;
+
+        for (final var data : packet.getEntityMetadata()) {
+            if ((changedMask & ViewerState.SUPPRESS_INVISIBLE) == 0 && data.getIndex() == FLAGS_INDEX
+                    && data.getType() == EntityDataTypes.BYTE) {
+                changedMask |= ViewerState.SUPPRESS_INVISIBLE;
+                if (((byte) data.getValue() & INVISIBLE_FLAG) != 0) values |= ViewerState.SUPPRESS_INVISIBLE;
+            } else if ((changedMask & ViewerState.SUPPRESS_SNEAK) == 0
+                    && data.getType() == EntityDataTypes.ENTITY_POSE) {
+                changedMask |= ViewerState.SUPPRESS_SNEAK;
+                if (data.getValue() == EntityPose.CROUCHING) values |= ViewerState.SUPPRESS_SNEAK;
+            }
+            if (changedMask == (ViewerState.SUPPRESS_INVISIBLE | ViewerState.SUPPRESS_SNEAK)) break;
+        }
+
+        if (changedMask == 0) return;
+        final var target = PlayerLookup.playerById(packet.getEntityId());
         if (target == null) return;
 
-        boolean invisFound = false, sneakFound = false;
-
-        for (final EntityData<?> data : packet.getEntityMetadata()) {
-            if (!invisFound && data.getIndex() == FLAGS_INDEX
-                    && data.getType() == EntityDataTypes.BYTE) {
-                final boolean invis = ((byte) data.getValue() & INVISIBLE_FLAG) != 0;
-                this.renderLoop.post(new RenderTask.SuppressChange(
-                        target, viewer, ViewerState.SUPPRESS_INVISIBLE, invis));
-                invisFound = true;
-                if (sneakFound) break;
-            } else if (!sneakFound && data.getType() == EntityDataTypes.ENTITY_POSE) {
-                final boolean sneak = data.getValue() == EntityPose.CROUCHING;
-                this.renderLoop.post(new RenderTask.SuppressChange(
-                        target, viewer, ViewerState.SUPPRESS_SNEAK, sneak));
-                sneakFound = true;
-                if (invisFound) break;
-            }
-        }
+        // Flags and pose belong to one packet; apply them without an intermediate visibility state.
+        this.renderLoop.post(new RenderTask.SuppressChange(target, viewer, changedMask, values));
     }
 }

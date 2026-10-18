@@ -22,7 +22,6 @@ public final class PlayerPositionHandler implements ClientBoundPacketHandler {
     @Override
     public void handle(@NotNull PacketSendEvent event) {
         final Player player = event.getPlayer();
-        this.renderLoop.post(new RenderTask.StopRendering(player, player));
         this.renderLoop.post(new RenderTask.Render(player, player));
     }
 }

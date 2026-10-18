@@ -11,8 +11,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Periodic tick source. Posts {@link RenderTask.Tick} for each online player
- * at a fixed interval. RenderLoop handles frame/placeholder update scheduling
+ * Periodic tick source. Posts one {@link RenderTask.Tick} at a fixed interval.
+ * RenderLoop handles frame/placeholder update scheduling
  * internally based on per-renderer rates.
  *
  * <p>The tick counter is local — no dependency on the Bukkit server tick counter,
@@ -50,7 +50,6 @@ public final class UpdateManager {
 
     private void tick() {
         final int tick = this.currentTick++;
-        // Post a single Tick task — RenderLoop iterates all states internally.
         this.renderLoop.post(new RenderTask.Tick(tick));
     }
 }

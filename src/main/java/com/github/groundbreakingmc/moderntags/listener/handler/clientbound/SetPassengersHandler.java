@@ -6,7 +6,6 @@ import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacket
 import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers;
-import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -25,9 +24,10 @@ public final class SetPassengersHandler implements ClientBoundPacketHandler {
     public void handle(@NotNull PacketSendEvent event) {
         final var packet = new WrapperPlayServerSetPassengers(event);
 
-        final Player target = PlayerLookup.playerById(packet.getEntityId());
+        final var target = PlayerLookup.playerById(packet.getEntityId());
         if (target == null) return;
 
+        // Merge before sending so tag entities do not replace the server's passengers.
         event.setCancelled(true);
 
         this.renderLoop.post(new RenderTask.PassengersUpdate(

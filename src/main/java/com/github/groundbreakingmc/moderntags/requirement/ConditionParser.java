@@ -6,17 +6,27 @@ import com.github.groundbreakingmc.moderntags.requirement.impl.logic.NotConditio
 import com.github.groundbreakingmc.moderntags.requirement.impl.logic.OrCondition;
 import com.github.groundbreakingmc.moderntags.util.ValueProvider;
 import com.github.retrooper.packetevents.PacketEvents;
-import com.google.common.collect.ImmutableMap;
 import me.clip.placeholderapi.PlaceholderAPIPlugin;
-import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 
 public final class ConditionParser {
 
-    private static final Map<String, FunctionDefinition> FUNCTIONS;
-    private static final Map<String, ValueProvider<?>> VARIABLES;
+    private static final Map<String, FunctionDefinition> FUNCTIONS = Map.of(
+            "hasPermission", arguments -> {
+                final var permission = (String) arguments.get(0).value(null);
+                Objects.requireNonNull(permission, "permission can't be null!");
+                return context -> context.player().hasPermission(permission);
+            }
+    );
+    private static final Map<String, ValueProvider<?>> VARIABLES = Map.of(
+            "protocol_version", context -> PacketEvents.getAPI().getPlayerManager()
+                    .getClientVersion(context.player()).getProtocolVersion()
+    );
 
     private final String rawCondition;
     private final char[] chars;
@@ -25,7 +35,6 @@ public final class ConditionParser {
     private ConditionParser(String rawCondition) {
         this.rawCondition = rawCondition;
         this.chars = rawCondition.toCharArray();
-        this.pos = 0;
     }
 
     public static Condition parse(@NotNull String rawCondition) {
@@ -35,9 +44,10 @@ public final class ConditionParser {
 
     public Condition parse() {
         this.skipWhitespace();
-        final Condition condition = this.parseOr();
+        final var condition = this.parseOr();
         if (this.pos < this.chars.length) {
-            throw new IllegalArgumentException("Unexpected characters '" + this.collectRest() + "' at position " + this.pos + " in expression: " + this.rawCondition);
+            throw new IllegalArgumentException("Unexpected characters '" + this.rawCondition.substring(this.pos)
+                    + "' at position " + this.pos + " in expression: " + this.rawCondition);
         }
         return condition;
     }
@@ -68,7 +78,6 @@ public final class ConditionParser {
         this.skipWhitespace();
 
         if (this.match("!")) {
-            this.skipWhitespace();
             return new NotCondition(this.parseUnary());
         }
 
@@ -79,8 +88,7 @@ public final class ConditionParser {
         this.skipWhitespace();
 
         if (this.match("(")) {
-            this.skipWhitespace();
-            final Condition condition = this.parseOr();
+            final var condition = this.parseOr();
             this.skipWhitespace();
             this.expect(")");
             return condition;
@@ -90,43 +98,31 @@ public final class ConditionParser {
     }
 
     private Condition parseConditionOrComparison() {
-        final ValueProvider<?> left = this.parseExpression();
+        final var left = this.parseExpression();
         this.skipWhitespace();
 
         if (this.match("==")) {
-            this.skipWhitespace();
-            final ValueProvider<?> right = this.parseExpression();
-            return new EqualsCondition(left, right);
+            return new EqualsCondition(left, this.parseExpression());
         }
 
         if (this.match("!=")) {
-            this.skipWhitespace();
-            final ValueProvider<?> right = this.parseExpression();
-            return new NotEqualsCondition(left, right);
+            return new NotEqualsCondition(left, this.parseExpression());
         }
 
         if (this.match(">=")) {
-            this.skipWhitespace();
-            final ValueProvider<?> right = this.parseExpression();
-            return new GreaterThanOrEqualCondition(left, right);
+            return new GreaterThanOrEqualCondition(left, this.parseExpression());
         }
 
         if (this.match("<=")) {
-            this.skipWhitespace();
-            final ValueProvider<?> right = this.parseExpression();
-            return new LessThanOrEqualCondition(left, right);
+            return new LessThanOrEqualCondition(left, this.parseExpression());
         }
 
         if (this.match(">")) {
-            this.skipWhitespace();
-            final ValueProvider<?> right = this.parseExpression();
-            return new GreaterThanCondition(left, right);
+            return new GreaterThanCondition(left, this.parseExpression());
         }
 
         if (this.match("<")) {
-            this.skipWhitespace();
-            final ValueProvider<?> right = this.parseExpression();
-            return new LessThanCondition(left, right);
+            return new LessThanCondition(left, this.parseExpression());
         }
 
         return new BooleanCondition(left);
@@ -138,42 +134,42 @@ public final class ConditionParser {
         final char peek = this.peek();
 
         if (peek == '"' || peek == '\'') {
-            final String str = this.parseString();
-            return ctx -> str;
+            final var value = this.parseString();
+            return context -> value;
         }
 
         if (peek == '-' || Character.isDigit(peek)) {
-            final Number num = this.parseNumber();
-            return ctx -> num;
+            final var value = this.parseNumber();
+            return context -> value;
         }
 
         if (peek == '%') {
             this.consume();
-            final String key = this.parseIdentifier();
+            final var key = this.parseIdentifier();
             this.expect("%");
 
-            final int sep = key.indexOf('_');
-            final String identifier = (sep != -1 ? key.substring(0, sep) : key)
+            final int sepIdx = key.indexOf('_');
+            final var identifier = (sepIdx != -1 ? key.substring(0, sepIdx) : key)
                     .toLowerCase(Locale.ROOT);
-            final String params = sep != -1 ? key.substring(sep + 1) : "";
+            final var params = sepIdx != -1 ? key.substring(sepIdx + 1) : "";
 
-            return ctx -> {
-                final PlaceholderExpansion expansion = PlaceholderAPIPlugin.getInstance()
+            return context -> {
+                // Resolve on evaluation so expansion registration changes remain visible.
+                final var expansion = PlaceholderAPIPlugin.getInstance()
                         .getLocalExpansionManager()
                         .getExpansion(identifier);
                 return expansion != null
-                        ? expansion.onRequest(ctx.player(), params)
+                        ? expansion.onRequest(context.player(), params)
                         : "no expansion found for placeholder: %" + key + "%";
             };
         }
 
-        boolean variable = false;
-        if (this.peek() == '{') {
-            variable = true;
+        final boolean variable = peek == '{';
+        if (variable) {
             this.consume();
         }
 
-        final String identifier = this.parseIdentifier();
+        final var identifier = this.parseIdentifier();
         this.skipWhitespace();
 
         if (!variable) {
@@ -186,7 +182,7 @@ public final class ConditionParser {
     private ValueProvider<?> parseFunctionCall(String functionName) {
         this.expect("(");
 
-        final List<ValueProvider<?>> arguments = new ArrayList<>();
+        final var arguments = new ArrayList<ValueProvider<?>>();
         this.skipWhitespace();
 
         if (this.peek() != ')') {
@@ -199,34 +195,35 @@ public final class ConditionParser {
                 }
 
                 this.expect(",");
-                this.skipWhitespace();
             }
         }
 
         this.expect(")");
 
-        final var functionDef = FUNCTIONS.get(functionName);
-        if (functionDef == null) {
-            throw new IllegalArgumentException("Unknown function: '" + functionName + "' in expression: " + this.rawCondition);
+        final var function = FUNCTIONS.get(functionName);
+        if (function == null) {
+            throw new IllegalArgumentException("Unknown function: '" + functionName
+                    + "' in expression: " + this.rawCondition);
         }
 
-        return functionDef.create(arguments);
+        return function.create(arguments);
     }
 
     private ValueProvider<?> parseVariable(String identifier) {
         this.expect("}");
 
-        final var variableDef = VARIABLES.get(identifier);
-        if (variableDef != null) {
-            return variableDef;
+        final var variable = VARIABLES.get(identifier);
+        if (variable != null) {
+            return variable;
         }
 
-        throw new IllegalArgumentException("Unknown identifier: '" + identifier + "' in expression: " + this.rawCondition);
+        throw new IllegalArgumentException("Unknown identifier: '" + identifier
+                + "' in expression: " + this.rawCondition);
     }
 
     private String parseString() {
         final char quote = this.consume();
-        final StringBuilder sb = new StringBuilder();
+        final var sb = new StringBuilder();
 
         while (this.pos < this.chars.length && this.peek() != quote) {
             if (this.peek() == '\\') {
@@ -260,7 +257,7 @@ public final class ConditionParser {
         }
 
         boolean hasDecimal = false;
-        while (this.pos < chars.length) {
+        while (this.pos < this.chars.length) {
             final char c = this.peek();
             if (Character.isDigit(c)) {
                 this.consume();
@@ -272,20 +269,20 @@ public final class ConditionParser {
             }
         }
 
-        final String numStr = this.rawCondition.substring(start, this.pos);
+        final var numStr = this.rawCondition.substring(start, this.pos);
 
         if (numStr.equals("-") || numStr.isEmpty()) {
-            throw new IllegalArgumentException("Invalid number at position " + start + " in expression: " + this.rawCondition);
+            throw new IllegalArgumentException("Invalid number at position " + start
+                    + " in expression: " + this.rawCondition);
         }
 
         if (hasDecimal) {
             return Double.parseDouble(numStr);
-        } else {
-            try {
-                return Integer.parseInt(numStr);
-            } catch (NumberFormatException e) {
-                return Long.parseLong(numStr);
-            }
+        }
+        try {
+            return Integer.parseInt(numStr);
+        } catch (NumberFormatException ignored) {
+            return Long.parseLong(numStr);
         }
     }
 
@@ -302,7 +299,8 @@ public final class ConditionParser {
         }
 
         if (start == this.pos) {
-            throw new IllegalArgumentException("Expected identifier at position " + this.pos + " in expression: " + this.rawCondition);
+            throw new IllegalArgumentException("Expected identifier at position " + this.pos
+                    + " in expression: " + this.rawCondition);
         }
 
         return this.rawCondition.substring(start, this.pos);
@@ -314,13 +312,12 @@ public final class ConditionParser {
         }
     }
 
-    private boolean match(String str) {
-        final char[] charArray = str.toCharArray();
-        final int savePos = this.pos;
+    private boolean match(String token) {
+        final int start = this.pos;
 
-        for (int i = 0; i < charArray.length; i++) {
-            if (this.pos >= this.chars.length || this.chars[this.pos] != charArray[i]) {
-                this.pos = savePos;
+        for (int i = 0; i < token.length(); i++) {
+            if (this.pos >= this.chars.length || this.chars[this.pos] != token.charAt(i)) {
+                this.pos = start;
                 return false;
             }
             this.pos++;
@@ -329,41 +326,22 @@ public final class ConditionParser {
         return true;
     }
 
-    private void expect(String str) {
-        if (!this.match(str)) {
-            throw new IllegalArgumentException("Expected '" + str + "' at position " + this.pos + " in expression: " + this.rawCondition);
+    private void expect(String token) {
+        if (!this.match(token)) {
+            throw new IllegalArgumentException("Expected '" + token + "' at position " + this.pos
+                    + " in expression: " + this.rawCondition);
         }
     }
 
     private char peek() {
-        if (this.pos >= this.chars.length)
-            throw new IllegalArgumentException("Unexpected end of input at position " + this.pos + " in expression: " + this.rawCondition);
+        if (this.pos >= this.chars.length) {
+            throw new IllegalArgumentException("Unexpected end of input at position " + this.pos
+                    + " in expression: " + this.rawCondition);
+        }
         return this.chars[this.pos];
     }
 
     private char consume() {
         return this.chars[this.pos++];
-    }
-
-    private String collectRest() {
-        final StringBuilder restBuilder = new StringBuilder();
-        for (int i = this.pos; i < this.chars.length; i++) {
-            restBuilder.append(this.chars[i]);
-        }
-        return restBuilder.toString();
-    }
-
-    static {
-        FUNCTIONS = ImmutableMap.copyOf(new HashMap<>() {{
-            put("hasPermission", args -> {
-                final String permission = (String) args.get(0).value(null);
-                Objects.requireNonNull(permission, "permission can't be null!");
-                return ctx -> ctx.player().hasPermission(permission);
-            });
-        }});
-
-        VARIABLES = ImmutableMap.copyOf(new HashMap<>() {{
-            put("protocol_version", ctx -> PacketEvents.getAPI().getPlayerManager().getClientVersion(ctx.player()).getProtocolVersion());
-        }});
     }
 }

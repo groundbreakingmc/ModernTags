@@ -13,13 +13,13 @@ import java.util.List;
 /**
  * Intercepts TEAMS packets and delegates all routing decisions to {@link RenderLoop}.
  *
- * <h3>Design</h3>
+ * <h2>Design</h2>
  * <p>This handler is intentionally thin — it cancels the packet and posts a
  * {@link RenderTask.TeamPacket} that carries the full original context.
  * {@link RenderLoop#handleTeamPacket} performs the actual per-player classification
  * during drain (drain-only access, no synchronisation needed).
  *
- * <h3>Why cancel unconditionally?</h3>
+ * <h2>Why cancel unconditionally?</h2>
  * <ul>
  *   <li><b>ModernRenderer</b> — must re-send with {@code nameTagVisibility=NEVER}
  *       and track CREATE vs UPDATE per viewer to avoid sending UPDATE to a client
@@ -42,17 +42,16 @@ public final class UpdateTeamHandler implements ClientBoundPacketHandler {
     public void handle(@NotNull PacketSendEvent event) {
         final var packet = new WrapperPlayServerTeams(event);
 
-        // Always cancel — RenderLoop is the sole authority on what each viewer sees.
+        // Routing must finish before any original team membership reaches the viewer.
         event.setCancelled(true);
 
         final Player viewer = event.getPlayer();
-        final String teamName = packet.getTeamName();
-        final WrapperPlayServerTeams.TeamMode mode = packet.getTeamMode();
+        final var teamName = packet.getTeamName();
+        final var mode = packet.getTeamMode();
 
-        // Extract info and player list eagerly so we don't hold a PacketEvents wrapper reference
-        // beyond the netty thread. TeamPacket is a plain data carrier.
-        final WrapperPlayServerTeams.ScoreBoardTeamInfo info = packet.getTeamInfo().orElse(null);
-        final List<String> players = List.copyOf(packet.getPlayers());
+        // Copy packet data before leaving the Netty callback; the wrapper must not escape it.
+        final var info = packet.getTeamInfo().orElse(null);
+        final var players = List.copyOf(packet.getPlayers());
 
         this.renderLoop.post(new RenderTask.TeamPacket(viewer, teamName, mode, info, players));
     }

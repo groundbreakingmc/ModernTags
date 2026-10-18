@@ -22,10 +22,7 @@ public final class InputHandler implements ServerBoundPacketHandler {
         final Player viewer = event.getPlayer();
         final byte flags = ByteBufHelper.readByte(event.getByteBuf());
 
-        if ((flags & (1 << 5)) != 0) {
-            this.renderLoop.post(new RenderTask.SuppressChange(viewer, viewer, ViewerState.SUPPRESS_SNEAK, true));
-        } else {
-            this.renderLoop.post(new RenderTask.SuppressChange(viewer, viewer, ViewerState.SUPPRESS_SNEAK, false));
-        }
+        final boolean sneaking = (flags & (1 << 5)) != 0;
+        this.renderLoop.post(new RenderTask.SuppressChange(viewer, viewer, ViewerState.SUPPRESS_SNEAK, sneaking));
     }
 }

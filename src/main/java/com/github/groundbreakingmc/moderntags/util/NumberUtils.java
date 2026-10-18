@@ -2,8 +2,9 @@ package com.github.groundbreakingmc.moderntags.util;
 
 public class NumberUtils {
 
-    public static String healthToStr(double v) {
-        final int normalized = (int) Math.ceil(v);
+    public static String healthToStr(double health) {
+        final int normalized = healthToInt(health);
+        // Reuse string literals for common health values.
         return switch (normalized) {
             case 0 -> "0";
             case 1 -> "1";
@@ -30,7 +31,7 @@ public class NumberUtils {
         };
     }
 
-    public static int healthToInt(double v) {
-        return (int) Math.ceil(v);
+    public static int healthToInt(double health) {
+        return (int) Math.ceil(health);
     }
 }

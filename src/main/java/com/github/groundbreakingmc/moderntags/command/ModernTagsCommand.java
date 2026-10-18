@@ -48,33 +48,41 @@ public final class ModernTagsCommand implements TabExecutor {
         }
 
         if (args.length == 0 || args[0].equalsIgnoreCase("reload")) {
-            this.plugin.reload().whenComplete((result, error) -> {
-                if (error != null) {
-                    sender.sendMessage("§cFailed to reload configuration. See the console for details.");
-                    this.plugin.getLogger().log(Level.SEVERE, "Error reloading configuration", error);
-                } else {
-                    sender.sendMessage("§aModernTags configuration reloaded successfully!");
-                }
-            });
+            this.reloadConfiguration(sender);
         } else if (args[0].equalsIgnoreCase("update")) {
-            sender.sendMessage("§eChecking for updates...");
-            this.updatesChecker.check(true).whenComplete((status, error) -> {
-                if (error != null) {
-                    sender.sendMessage("§cFailed to check or download the update. See the console for details.");
-                    return;
-                }
-                sender.sendMessage(switch (status) {
-                    case NO_UPDATE -> "§aNo updates were found.";
-                    case DOWNLOADED -> "§aUpdate downloaded. Restart the server to install it.";
-                    case BUSY -> "§eAn update check or download is already in progress. Try again shortly.";
-                    default -> "§cThe update could not be downloaded. See the console for details.";
-                });
-            });
+            this.downloadUpdate(sender);
         } else {
             sender.sendMessage("§eUsage: /" + label + " <reload|update>");
         }
 
         return true;
+    }
+
+    private void reloadConfiguration(@NotNull CommandSender sender) {
+        this.plugin.reload().whenComplete((result, error) -> {
+            if (error != null) {
+                sender.sendMessage("§cFailed to reload configuration. See the console for details.");
+                this.plugin.getLogger().log(Level.SEVERE, "Error reloading configuration", error);
+            } else {
+                sender.sendMessage("§aModernTags configuration reloaded successfully!");
+            }
+        });
+    }
+
+    private void downloadUpdate(@NotNull CommandSender sender) {
+        sender.sendMessage("§eChecking for updates...");
+        this.updatesChecker.check(true).whenComplete((status, error) -> {
+            if (error != null) {
+                sender.sendMessage("§cFailed to check or download the update. See the console for details.");
+                return;
+            }
+            sender.sendMessage(switch (status) {
+                case NO_UPDATE -> "§aNo updates were found.";
+                case DOWNLOADED -> "§aUpdate downloaded. Restart the server to install it.";
+                case BUSY -> "§eAn update check or download is already in progress. Try again shortly.";
+                default -> "§cThe update could not be downloaded. See the console for details.";
+            });
+        });
     }
 
     /**
@@ -88,11 +96,11 @@ public final class ModernTagsCommand implements TabExecutor {
      * @return matching subcommands, or an empty list for later arguments
      */
     @Override
-    public @NotNull List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
-                                               @NotNull String label, @NotNull String @NotNull [] args) {
+    public @NotNull List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String @NotNull [] args) {
         if (args.length != 1 || !sender.hasPermission("moderntags.admin")) return List.of();
-        if (this.plugin.configValues().autoDownloadUpdates())
+        if (this.plugin.configValues().autoDownloadUpdates()) {
             return CommandUtils.tabComplete(args[0], List.of("reload"));
+        }
         return CommandUtils.tabComplete(args[0], List.of("reload", "update"));
     }
 }

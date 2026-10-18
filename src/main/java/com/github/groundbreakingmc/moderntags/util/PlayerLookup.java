@@ -11,7 +11,7 @@ public final class PlayerLookup {
     }
 
     public static @Nullable Player playerById(int entityId) {
-        for (final Player player : Bukkit.getOnlinePlayers()) {
+        for (final var player : Bukkit.getOnlinePlayers()) {
             if (player.getEntityId() == entityId) {
                 return player;
             }

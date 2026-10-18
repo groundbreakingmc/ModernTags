@@ -15,10 +15,10 @@ public final class BooleanCondition implements Condition {
 
     @Override
     public boolean test(@NotNull Context context) {
-        final Object value = this.provider.value(context);
+        final var value = this.provider.value(context);
 
-        if (value instanceof Boolean bool) {
-            return bool;
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue;
         }
 
         throw new IllegalStateException(

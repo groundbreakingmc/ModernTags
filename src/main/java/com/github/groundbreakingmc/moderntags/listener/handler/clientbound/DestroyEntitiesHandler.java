@@ -25,7 +25,7 @@ public final class DestroyEntitiesHandler implements ClientBoundPacketHandler {
         final var packet = new WrapperPlayServerDestroyEntities(event);
         final Player viewer = event.getPlayer();
         for (final int entityId : packet.getEntityIds()) {
-            final Player target = PlayerLookup.playerById(entityId);
+            final var target = PlayerLookup.playerById(entityId);
             if (target != null) {
                 this.renderLoop.post(new RenderTask.StopTracking(target, viewer));
             }

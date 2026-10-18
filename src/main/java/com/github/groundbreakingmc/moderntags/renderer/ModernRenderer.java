@@ -2,7 +2,6 @@ package com.github.groundbreakingmc.moderntags.renderer;
 
 import com.github.groundbreakingmc.gikymessage.Text;
 import com.github.groundbreakingmc.moderntags.ModernTags;
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
 import com.github.groundbreakingmc.moderntags.core.RenderTask;
 import com.github.groundbreakingmc.moderntags.core.ViewerState;
 import com.github.groundbreakingmc.moderntags.text.TagTextResolver;
@@ -57,7 +56,7 @@ public final class ModernRenderer implements TagRenderer {
     /**
      * Per-target state. Plain map — drain-only access.
      */
-    private final IdentityHashMap<Player, TargetData> targetData = new IdentityHashMap<>(64);
+    private final Map<Player, TargetData> targetData = new IdentityHashMap<>(64);
 
     private final ProtocolManager protocolManager = PacketEvents.getAPI().getProtocolManager();
 
@@ -75,7 +74,7 @@ public final class ModernRenderer implements TagRenderer {
         final int frameUpdateRate = config.findInt("frame-update-rate");
         final int placeholdersUpdateRate = config.findInt("placeholders-update-rate");
 
-        final List<Frame> frames = config.findSectionList("frames").stream()
+        final var frames = config.findSectionList("frames").stream()
                 .map(frame -> parseFrame(frame, plugin.tagTextResolver()))
                 .collect(ImmutableList.toImmutableList());
 
@@ -85,25 +84,20 @@ public final class ModernRenderer implements TagRenderer {
         return new ModernRenderer(plugin, frameUpdateRate, placeholdersUpdateRate, frames);
     }
 
-    // ── TagRenderer ───────────────────────────────────────────────────────────
-
     @Override
     public void render(@NotNull ViewerState state) {
-        final TargetData data = this.getOrCreate(state.target);
-        final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
-        if (channel == null) return;
+        final var data = this.targetData.computeIfAbsent(state.target, target -> new TargetData());
+        final var frame = this.frames.get(data.currentFrame);
 
-        final Frame frame = this.frames.get(data.currentFrame);
-
-        this.protocolManager.sendPacketSilently(channel,
+        this.protocolManager.sendPacketSilently(state.channel,
                 createSpawnPacket(data.tagEntityId, state.target.getLocation()));
-        this.protocolManager.sendPacketSilently(channel,
+        this.protocolManager.sendPacketSilently(state.channel,
                 this.createMetadataPacket(state, data, frame));
 
         // Validate delayed attachment on the render loop after the client has processed the spawn.
-        final RenderLoop renderLoop = this.plugin.renderLoop();
-        final RenderTask.AttachTag attachment = new RenderTask.AttachTag(
-                state, state.renderGeneration, this, data.tagEntityId, channel);
+        final var renderLoop = this.plugin.renderLoop();
+        final var attachment = new RenderTask.AttachTag(
+                state, state.renderGeneration, this, data.tagEntityId);
         state.pendingAttach = attachment;
         Bukkit.getAsyncScheduler().runDelayed(this.plugin, task -> {
             attachment.ready().set(true);
@@ -117,29 +111,28 @@ public final class ModernRenderer implements TagRenderer {
      * Attaches a current tag after the render loop validates its state and generation.
      * Called only during drain, which owns target data and viewer membership.
      */
-    public void attachPassengers(@NotNull ViewerState state, int tagEntityId, @NotNull Object channel) {
-        final TargetData data = this.targetData.get(state.target);
+    public void attachPassengers(@NotNull ViewerState state, int tagEntityId) {
+        final var data = this.targetData.get(state.target);
         if (data == null || data.tagEntityId != tagEntityId || data.viewers.get(state.viewer) != state) return;
-        if (state.target.isOnline() && !state.target.isDead() && ChannelHelper.isOpen(channel)) {
-            this.protocolManager.sendPacketSilently(channel,
+        if (state.target.isOnline() && !state.target.isDead() && ChannelHelper.isOpen(state.channel)) {
+            this.protocolManager.sendPacketSilently(state.channel,
                     createSetPassengersWithTag(state.target, tagEntityId));
         }
     }
 
     @Override
     public void stopRendering(@NotNull ViewerState state) {
-        final TargetData data = this.targetData.get(state.target);
+        final var data = this.targetData.get(state.target);
         if (data == null) return;
 
-        PacketEvents.getAPI().getPlayerManager().sendPacketSilently(
-                state.viewer, createDestroyPacket(data.tagEntityId));
+        this.protocolManager.sendPacketSilently(state.channel, createDestroyPacket(data.tagEntityId));
         data.viewers.remove(state.viewer);
     }
 
     @Override
     public void updateFrame(@NotNull ViewerState state) {
         if (this.frames.size() <= 1) return;
-        final TargetData data = this.targetData.get(state.target);
+        final var data = this.targetData.get(state.target);
         if (data == null) return;
 
         data.currentFrame = (data.currentFrame + 1) % this.frames.size();
@@ -148,24 +141,30 @@ public final class ModernRenderer implements TagRenderer {
 
     @Override
     public void updatePlaceholders(@NotNull ViewerState state) {
-        final TargetData data = this.targetData.get(state.target);
+        final var data = this.targetData.get(state.target);
         if (data == null) return;
-        this.broadcastMetadata(data);
+        final var frame = this.frames.get(data.currentFrame);
+        // Frame settings and opacity remain on the client until their own update paths change them.
+        for (final var pair : data.viewers.values()) {
+            this.protocolManager.sendPacketSilently(pair.channel,
+                    new WrapperPlayServerEntityMetadata(data.tagEntityId,
+                            List.of(this.createTextData(pair, frame))));
+        }
     }
 
     @Override
     public void cleanup(@NotNull Player player) {
-        final TargetData data = this.targetData.remove(player);
+        final var data = this.targetData.remove(player);
 
-        for (final TargetData td : this.targetData.values()) {
-            td.viewers.remove(player);
+        for (final var otherTarget : this.targetData.values()) {
+            otherTarget.viewers.remove(player);
         }
 
         if (data == null) return;
 
         final var destroyPacket = createDestroyPacket(data.tagEntityId);
-        for (final Player viewer : data.viewers.keySet()) {
-            PacketEvents.getAPI().getPlayerManager().sendPacketSilently(viewer, destroyPacket);
+        for (final var state : data.viewers.values()) {
+            this.protocolManager.sendPacketSilently(state.channel, destroyPacket);
         }
     }
 
@@ -179,27 +178,20 @@ public final class ModernRenderer implements TagRenderer {
         return this.placeholdersUpdateRate;
     }
 
-    // ── Sneak opacity ─────────────────────────────────────────────────────────
-
     /**
      * Updates an existing display's opacity for the pair's current sneaking state.
      *
      * @param state the rendered pair whose opacity is refreshed
      */
     public void updateOpacity(@NotNull ViewerState state) {
-        final TargetData data = this.targetData.get(state.target);
+        final var data = this.targetData.get(state.target);
         if (data == null) return;
-        final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
-        if (channel == null) return;
-
-        final Frame frame = this.frames.get(data.currentFrame);
-        this.protocolManager.sendPacketSilently(channel,
+        final var frame = this.frames.get(data.currentFrame);
+        this.protocolManager.sendPacketSilently(state.channel,
                 new WrapperPlayServerEntityMetadata(data.tagEntityId,
                         state.hasSuppress(ViewerState.SUPPRESS_SNEAK)
                                 ? frame.dataWithSneakOpacity() : frame.dataWithDefaultOpacity()));
     }
-
-    // ── Passenger IDs ─────────────────────────────────────────────────────────
 
     /**
      * Returns the display ID only for a rendered pair registered in this renderer.
@@ -210,23 +202,17 @@ public final class ModernRenderer implements TagRenderer {
      */
     public int[] ownedPassengerIds(@NotNull ViewerState state) {
         if (!state.rendered) return new int[0];
-        final TargetData data = this.targetData.get(state.target);
+        final var data = this.targetData.get(state.target);
         return data != null ? new int[]{data.tagEntityId} : new int[0];
     }
 
-    // ── Broadcast ─────────────────────────────────────────────────────────────
-
     private void broadcastMetadata(@NotNull TargetData data) {
-        final Frame frame = this.frames.get(data.currentFrame);
-        for (final ViewerState state : data.viewers.values()) {
-            final Object channel = this.protocolManager.getChannel(state.viewer.getUniqueId());
-            if (channel == null) continue;
-            this.protocolManager.sendPacketSilently(channel,
+        final var frame = this.frames.get(data.currentFrame);
+        for (final var state : data.viewers.values()) {
+            this.protocolManager.sendPacketSilently(state.channel,
                     this.createMetadataPacket(state, data, frame));
         }
     }
-
-    // ── Packet builders ───────────────────────────────────────────────────────
 
     private static WrapperPlayServerSpawnEntity createSpawnPacket(int entityId,
                                                                   @NotNull Location location) {
@@ -240,15 +226,17 @@ public final class ModernRenderer implements TagRenderer {
     private WrapperPlayServerEntityMetadata createMetadataPacket(@NotNull ViewerState state,
                                                                  @NotNull TargetData data,
                                                                  @NotNull Frame frame) {
-        final List<EntityData<?>> metadata = new ArrayList<>(frame.entityData().size() + 2);
+        final var metadata = new ArrayList<EntityData<?>>(frame.entityData().size() + 2);
         metadata.addAll(frame.entityData());
-        metadata.add(new EntityData<>(
-                TEXT_COMPONENT_INDEX, EntityDataTypes.ADV_COMPONENT,
-                this.plugin.tagTextResolver().resolve(state, frame.text())
-        ));
+        metadata.add(this.createTextData(state, frame));
         metadata.add(state.hasSuppress(ViewerState.SUPPRESS_SNEAK)
                 ? frame.dataWithSneakOpacity().getFirst() : frame.dataWithDefaultOpacity().getFirst());
         return new WrapperPlayServerEntityMetadata(data.tagEntityId, metadata);
+    }
+
+    private EntityData<?> createTextData(@NotNull ViewerState state, @NotNull Frame frame) {
+        return new EntityData<>(TEXT_COMPONENT_INDEX, EntityDataTypes.ADV_COMPONENT,
+                this.plugin.tagTextResolver().resolve(state, frame.text()));
     }
 
     private static WrapperPlayServerSetPassengers createSetPassengersWithTag(
@@ -264,26 +252,18 @@ public final class ModernRenderer implements TagRenderer {
         return new WrapperPlayServerDestroyEntities(entityIds);
     }
 
-    // ── Per-target state ──────────────────────────────────────────────────────
-
-    @NotNull
-    private TargetData getOrCreate(@NotNull Player target) {
-        return this.targetData.computeIfAbsent(target, k -> new TargetData());
-    }
-
     private static final class TargetData {
 
         final int tagEntityId = SpigotReflectionUtil.generateEntityId();
         int currentFrame = 0;
 
+        // Broadcast only to pairs with a display registered in this renderer.
         /**
          * Viewers currently seeing this target's tag. Maintained for broadcast in
          * {@link #updateFrame}/{@link #updatePlaceholders}; mirrors RenderLoop's authoritative list.
          */
         final Map<Player, ViewerState> viewers = new IdentityHashMap<>();
     }
-
-    // ── Frame ─────────────────────────────────────────────────────────────────
 
     public static final class Frame {
 
@@ -336,88 +316,91 @@ public final class ModernRenderer implements TagRenderer {
             private TextDisplay.TextAlignment alignment = TextDisplay.TextAlignment.CENTER;
             private int brightnessEncoded = -1;
 
-            public Builder text(String v) {
-                this.text = v;
+            public Builder() {
+            }
+
+            public Builder text(String text) {
+                this.text = text;
                 return this;
             }
 
-            public Builder xOffset(float v) {
-                this.xOffset = v;
+            public Builder xOffset(float offset) {
+                this.xOffset = offset;
                 return this;
             }
 
-            public Builder yOffset(float v) {
-                this.yOffset = v;
+            public Builder yOffset(float offset) {
+                this.yOffset = offset;
                 return this;
             }
 
-            public Builder zOffset(float v) {
-                this.zOffset = v;
+            public Builder zOffset(float offset) {
+                this.zOffset = offset;
                 return this;
             }
 
-            public Builder scale(float v) {
-                this.scale = v;
+            public Builder scale(float scale) {
+                this.scale = scale;
                 return this;
             }
 
-            public Builder useVerticalBillboard(boolean v) {
-                this.useVerticalBillboard = v;
+            public Builder useVerticalBillboard(boolean vertical) {
+                this.useVerticalBillboard = vertical;
                 return this;
             }
 
-            public Builder viewRange(float v) {
-                this.viewRange = v;
+            public Builder viewRange(float range) {
+                this.viewRange = range;
                 return this;
             }
 
-            public Builder shadowRadius(float v) {
-                this.shadowRadius = v;
+            public Builder shadowRadius(float radius) {
+                this.shadowRadius = radius;
                 return this;
             }
 
-            public Builder shadowStrength(float v) {
-                this.shadowStrength = v;
+            public Builder shadowStrength(float strength) {
+                this.shadowStrength = strength;
                 return this;
             }
 
-            public Builder lineWidth(int v) {
-                this.lineWidth = v;
+            public Builder lineWidth(int width) {
+                this.lineWidth = width;
                 return this;
             }
 
-            public Builder textOpacity(byte v) {
-                this.textOpacity = v;
+            public Builder textOpacity(byte opacity) {
+                this.textOpacity = opacity;
                 return this;
             }
 
-            public Builder sneakTextOpacity(byte v) {
-                this.sneakTextOpacity = v;
+            public Builder sneakTextOpacity(byte opacity) {
+                this.sneakTextOpacity = opacity;
                 return this;
             }
 
-            public Builder shadowed(boolean v) {
-                this.shadowed = v;
+            public Builder shadowed(boolean shadowed) {
+                this.shadowed = shadowed;
                 return this;
             }
 
-            public Builder seeThrough(boolean v) {
-                this.seeThrough = v;
+            public Builder seeThrough(boolean seeThrough) {
+                this.seeThrough = seeThrough;
                 return this;
             }
 
-            public Builder defaultBackground(boolean v) {
-                this.defaultBackground = v;
+            public Builder defaultBackground(boolean defaultBackground) {
+                this.defaultBackground = defaultBackground;
                 return this;
             }
 
-            public Builder alignment(TextDisplay.TextAlignment v) {
-                this.alignment = v;
+            public Builder alignment(TextDisplay.TextAlignment alignment) {
+                this.alignment = alignment;
                 return this;
             }
 
-            public Builder backgroundColor(Color v) {
-                this.backgroundColor = v;
+            public Builder backgroundColor(Color color) {
+                this.backgroundColor = color;
                 return this;
             }
 
@@ -427,7 +410,7 @@ public final class ModernRenderer implements TagRenderer {
             }
 
             public Frame build(@NotNull TagTextResolver textResolver) {
-                final List<EntityData<?>> entityData = new ArrayList<>();
+                final var entityData = new ArrayList<EntityData<?>>();
                 entityData.add(new EntityData<>(11, EntityDataTypes.VECTOR3F, new Vector3f(this.xOffset, this.yOffset, this.zOffset)));
                 entityData.add(new EntityData<>(12, EntityDataTypes.VECTOR3F, new Vector3f(this.scale, this.scale, this.scale)));
                 entityData.add(new EntityData<>(15, EntityDataTypes.BYTE, (byte) (this.useVerticalBillboard ? 1 : 3)));
@@ -450,8 +433,8 @@ public final class ModernRenderer implements TagRenderer {
                 return new Frame(textResolver.compile(this.text), this.textOpacity, this.sneakTextOpacity, entityData);
             }
 
-            private static int alignmentToBits(TextDisplay.TextAlignment a) {
-                return switch (a) {
+            private static int alignmentToBits(TextDisplay.TextAlignment alignment) {
+                return switch (alignment) {
                     case CENTER -> 0;
                     case LEFT -> 1;
                     case RIGHT -> 2;
@@ -461,36 +444,36 @@ public final class ModernRenderer implements TagRenderer {
     }
 
     private static Frame parseFrame(@NotNull Config config, @NotNull TagTextResolver textResolver) {
-        final Frame.Builder b = Frame.builder();
+        final var builder = Frame.builder();
 
-        b.text(config.findStr("text"));
-        b.xOffset((float) config.doubleOr("x-offset", 0.0));
-        b.yOffset((float) config.doubleOr("y-offset", 0.15));
-        b.zOffset((float) config.doubleOr("z-offset", 0.0));
-        b.scale((float) config.doubleOr("scale", 1.0));
-        b.useVerticalBillboard(config.boolOr("vertical-billboard", false));
-        b.viewRange((float) config.doubleOr("view-range", 1.0));
-        b.shadowRadius((float) config.doubleOr("shadow-radius", 0.0));
-        b.shadowStrength((float) config.doubleOr("shadow-strength", 1.0));
-        b.lineWidth(config.intOr("line-width", 200));
-        b.textOpacity((byte) config.intOr("text-opacity", -1));
-        b.sneakTextOpacity((byte) config.intOr("sneak-opacity", 60));
-        b.shadowed(config.boolOr("shadowed", true));
-        b.seeThrough(config.boolOr("see-through", false));
-        b.defaultBackground(config.boolOr("default-background", false));
-        b.alignment(TextDisplay.TextAlignment.valueOf(
+        builder.text(config.findStr("text"));
+        builder.xOffset((float) config.doubleOr("x-offset", 0.0));
+        builder.yOffset((float) config.doubleOr("y-offset", 0.15));
+        builder.zOffset((float) config.doubleOr("z-offset", 0.0));
+        builder.scale((float) config.doubleOr("scale", 1.0));
+        builder.useVerticalBillboard(config.boolOr("vertical-billboard", false));
+        builder.viewRange((float) config.doubleOr("view-range", 1.0));
+        builder.shadowRadius((float) config.doubleOr("shadow-radius", 0.0));
+        builder.shadowStrength((float) config.doubleOr("shadow-strength", 1.0));
+        builder.lineWidth(config.intOr("line-width", 200));
+        builder.textOpacity((byte) config.intOr("text-opacity", -1));
+        builder.sneakTextOpacity((byte) config.intOr("sneak-opacity", 60));
+        builder.shadowed(config.boolOr("shadowed", true));
+        builder.seeThrough(config.boolOr("see-through", false));
+        builder.defaultBackground(config.boolOr("default-background", false));
+        builder.alignment(TextDisplay.TextAlignment.valueOf(
                 config.strOr("alignment", "CENTER").strip().toUpperCase()));
 
-        final String[] brightnessParts = config.strOr("brightness", "block-15").strip().split("-", 2);
-        b.brightness(brightnessParts[0].equalsIgnoreCase("block"), Integer.parseInt(brightnessParts[1]));
+        final var brightnessParts = config.strOr("brightness", "block-15").strip().split("-", 2);
+        builder.brightness(brightnessParts[0].equalsIgnoreCase("block"), Integer.parseInt(brightnessParts[1]));
 
-        final String rawBg = config.strOr("background-color", "#00000000").strip();
-        final String hex = !rawBg.isEmpty() && rawBg.charAt(0) == '#' ? rawBg.substring(1) : rawBg;
+        final var rawBackground = config.strOr("background-color", "#00000000").strip();
+        final var hex = !rawBackground.isEmpty() && rawBackground.charAt(0) == '#' ? rawBackground.substring(1) : rawBackground;
         final int argb = hex.length() == 6
                 ? (int) (0xFF000000L | Long.parseLong(hex, 16))
                 : (int) Long.parseLong(hex, 16);
-        b.backgroundColor(Color.fromARGB(argb));
+        builder.backgroundColor(Color.fromARGB(argb));
 
-        return b.build(textResolver);
+        return builder.build(textResolver);
     }
 }

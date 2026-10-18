@@ -14,8 +14,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.UUID;
-
 /**
  * Renders a player's tag on SPAWN_ENTITY or the older SPAWN_PLAYER packet.
  *
@@ -42,13 +40,13 @@ public final class SpawnEntityHandler implements ClientBoundPacketHandler {
         final int entityId = wrapper.readVarInt();
         if (entityId == viewer.getEntityId()) return; // self-spawn → PlayerPositionHandler
 
-        final UUID uniqueId = wrapper.readUUID();
+        final var uniqueId = wrapper.readUUID();
 
         // SPAWN_PLAYER carries no entity-type field before its coordinates.
         if (event.getPacketType() != PacketType.Play.Server.SPAWN_PLAYER
                 && EntityTypes.getById(this.serverVersion, wrapper.readVarInt()) != EntityTypes.PLAYER) return;
 
-        final Player target = Bukkit.getPlayer(uniqueId);
+        final var target = Bukkit.getPlayer(uniqueId);
         if (target == null) return;
 
         this.renderLoop.post(new RenderTask.ScheduleRender(target, viewer, this.plugin));

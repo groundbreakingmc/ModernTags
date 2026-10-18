@@ -43,7 +43,7 @@ public record TagEntry(
      */
     @NotNull
     public TagRenderer rendererFor(@NotNull Player viewer) {
-        final ClientVersion version = PacketEvents.getAPI()
+        final var version = PacketEvents.getAPI()
                 .getPlayerManager()
                 .getClientVersion(viewer);
 

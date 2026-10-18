@@ -22,15 +22,14 @@ public final class ActionHandler implements ServerBoundPacketHandler {
     public void handle(@NotNull PacketReceiveEvent event) {
         final var packet = new WrapperPlayClientEntityAction(event);
 
-        final Player target = PlayerLookup.playerById(packet.getEntityId());
-        if (target == null) return;
+        final var action = packet.getAction();
+        if (action != WrapperPlayClientEntityAction.Action.START_SNEAKING
+                && action != WrapperPlayClientEntityAction.Action.STOP_SNEAKING) return;
 
-        if (packet.getAction() == WrapperPlayClientEntityAction.Action.START_SNEAKING) {
-            final Player viewer = event.getPlayer();
-            this.renderLoop.post(new RenderTask.SuppressChange(target, viewer, ViewerState.SUPPRESS_SNEAK, true));
-        } else if (packet.getAction() == WrapperPlayClientEntityAction.Action.STOP_SNEAKING) {
-            final Player viewer = event.getPlayer();
-            this.renderLoop.post(new RenderTask.SuppressChange(target, viewer, ViewerState.SUPPRESS_SNEAK, false));
-        }
+        final var target = PlayerLookup.playerById(packet.getEntityId());
+        if (target == null) return;
+        final Player viewer = event.getPlayer();
+        this.renderLoop.post(new RenderTask.SuppressChange(target, viewer, ViewerState.SUPPRESS_SNEAK,
+                action == WrapperPlayClientEntityAction.Action.START_SNEAKING));
     }
 }

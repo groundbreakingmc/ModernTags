@@ -8,7 +8,6 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
-import com.github.retrooper.packetevents.protocol.potion.PotionType;
 import com.github.retrooper.packetevents.protocol.potion.PotionTypes;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import org.bukkit.entity.Player;
@@ -34,7 +33,7 @@ public final class SelfInvisibilityHandler implements ClientBoundPacketHandler {
         final Player viewer = event.getPlayer();
         if (viewer.getEntityId() != targetEntityId) return;
 
-        final PotionType potionType = PotionTypes.getById(this.serverVersion, packet.readVarInt());
+        final var potionType = PotionTypes.getById(this.serverVersion, packet.readVarInt());
         if (potionType != PotionTypes.INVISIBILITY) return;
 
         final boolean added = event.getPacketType() == PacketType.Play.Server.ENTITY_EFFECT;

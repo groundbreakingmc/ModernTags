@@ -43,7 +43,7 @@ public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
 
         final Player viewer = event.getPlayer();
         for (final var entry : packet.getEntries()) {
-            final Player target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
+            final var target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
             if (target == null) continue;
             if (updateGameMode) {
                 this.renderLoop.post(new RenderTask.GameModeUpdate(target, viewer));
