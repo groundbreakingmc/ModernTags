@@ -768,13 +768,7 @@ public final class RenderLoop {
             if (state != null) this.applySuppressChange(state, ViewerState.SUPPRESS_PASSENGER,
                     hasPassengers ? ViewerState.SUPPRESS_PASSENGER : (byte) 0);
         } else if (state != null && state.renderer instanceof ModernRenderer modern) {
-            final int[] tagPassengers = modern.ownedPassengerIds(state);
-            if (tagPassengers.length > 0) {
-                final int[] merged = new int[passengers.length + tagPassengers.length];
-                System.arraycopy(passengers, 0, merged, 0, passengers.length);
-                System.arraycopy(tagPassengers, 0, merged, passengers.length, tagPassengers.length);
-                passengers = merged;
-            }
+            passengers = modern.mergePassengers(state, passengers);
         }
 
         this.sendPassengers(channel, update.target().getEntityId(), passengers);

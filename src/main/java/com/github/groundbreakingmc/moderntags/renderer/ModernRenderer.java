@@ -194,16 +194,21 @@ public final class ModernRenderer implements TagRenderer {
     }
 
     /**
-     * Returns the display ID only for a rendered pair registered in this renderer.
+     * Appends this pair's rendered display ID to the server's passenger IDs.
      * A spawned display is eligible even while its delayed attachment is pending.
      *
      * @param state the pair whose display may be merged into a passenger packet
-     * @return the current display ID, or an empty array if this pair has no rendered display
+     * @param passengers the server's passenger IDs, which are never modified
+     * @return the original array if no display is rendered, otherwise a copy with its ID appended
      */
-    public int[] ownedPassengerIds(@NotNull ViewerState state) {
-        if (!state.rendered) return new int[0];
+    public int[] mergePassengers(@NotNull ViewerState state, int @NotNull [] passengers) {
+        if (!state.rendered) return passengers;
         final var data = this.targetData.get(state.target);
-        return data != null ? new int[]{data.tagEntityId} : new int[0];
+        if (data == null) return passengers;
+
+        final var merged = Arrays.copyOf(passengers, passengers.length + 1);
+        merged[passengers.length] = data.tagEntityId;
+        return merged;
     }
 
     private void broadcastMetadata(@NotNull TargetData data) {
