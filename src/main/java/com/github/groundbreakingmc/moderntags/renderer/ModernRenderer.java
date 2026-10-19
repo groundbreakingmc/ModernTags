@@ -55,7 +55,7 @@ public final class ModernRenderer implements TagRenderer {
     private final int frameUpdateRate;
     private final int placeholdersUpdateRate;
     private final List<Frame> frames;
-    private final int textIndex;
+    private final MetadataTemplate textTemplate;
     private final List<Transition> transitions;
 
     /**
@@ -73,12 +73,13 @@ public final class ModernRenderer implements TagRenderer {
         this.frameUpdateRate = frames.size() > 1 ? frameUpdateRate : -1;
         this.placeholdersUpdateRate = placeholdersUpdateRate;
         this.frames = frames;
-        this.textIndex = PacketEvents.getAPI().getServerManager().getVersion().isOlderThan(ServerVersion.V_1_20_2) ? 22 : 23;
+        this.textTemplate = new MetadataTemplate(PacketEvents.getAPI().getServerManager().getVersion(), List.of());
         this.transitions = compileTransitions(frames);
     }
 
     private List<Transition> compileTransitions(List<Frame> frames) {
         if (frames.size() <= 1) return List.of();
+        final var version = PacketEvents.getAPI().getServerManager().getVersion();
         final var transitions = new ArrayList<Transition>(frames.size());
         for (int i = 0; i < frames.size(); i++) {
             final var previous = frames.get((i + frames.size() - 1) % frames.size());
@@ -91,14 +92,14 @@ public final class ModernRenderer implements TagRenderer {
             }
             final var normal = current.dataWithDefaultOpacity().getFirst();
             final var sneak = current.dataWithSneakOpacity().getFirst();
-            transitions.add(new Transition(List.copyOf(changed),
+            transitions.add(new Transition(changed.isEmpty() ? this.textTemplate : new MetadataTemplate(version, changed),
                     normal.getValue().equals(previous.dataWithDefaultOpacity().getFirst().getValue()) ? null : normal,
                     sneak.getValue().equals(previous.dataWithSneakOpacity().getFirst().getValue()) ? null : sneak));
         }
         return transitions;
     }
 
-    private record Transition(List<EntityData<?>> entries, EntityData<?> normalOpacity, EntityData<?> sneakOpacity) {
+    private record Transition(MetadataTemplate metadata, EntityData<?> normalOpacity, EntityData<?> sneakOpacity) {
     }
 
     public static ModernRenderer of(@NotNull ModernTags plugin, @NotNull Config config) {
@@ -175,13 +176,16 @@ public final class ModernRenderer implements TagRenderer {
         final var data = this.targetData.get(state.target);
         if (data == null) return;
         final var frame = this.frames.get(data.currentFrame);
+        final var broadcast = new MetadataTemplate.Broadcast(this.textTemplate);
         // Frame settings and opacity remain on the client until their own update paths change them.
         for (final var pair : data.viewers.values()) {
             try {
                 final var text = this.plugin.tagTextResolver().resolve(pair, frame.text());
-                this.protocolManager.sendPacketSilently(pair.channel,
-                        new WrapperPlayServerEntityMetadata(data.tagEntityId,
-                                List.of(new EntityData<>(this.textIndex, EntityDataTypes.ADV_COMPONENT, text))));
+                if (!broadcast.send(this.protocolManager, pair.channel, data.tagEntityId, text, false, null)) {
+                    this.protocolManager.sendPacketSilently(pair.channel,
+                            new WrapperPlayServerEntityMetadata(data.tagEntityId,
+                                    List.of(this.textTemplate.textData(text))));
+                }
             } catch (RuntimeException failure) {
                 this.logMetadataFailure(pair, data.currentFrame, "update placeholders", failure);
             }
@@ -233,7 +237,7 @@ public final class ModernRenderer implements TagRenderer {
      * Appends this pair's rendered display ID to the server's passenger IDs.
      * A spawned display is eligible even while its delayed attachment is pending.
      *
-     * @param state the pair whose display may be merged into a passenger packet
+     * @param state      the pair whose display may be merged into a passenger packet
      * @param passengers the server's passenger IDs, which are never modified
      * @return the original array if no display is rendered, otherwise a copy with its ID appended
      */
@@ -250,13 +254,17 @@ public final class ModernRenderer implements TagRenderer {
     private void broadcastMetadata(@NotNull TargetData data) {
         final var frame = this.frames.get(data.currentFrame);
         final var transition = this.transitions.get(data.currentFrame);
+        final var broadcast = new MetadataTemplate.Broadcast(transition.metadata());
         for (final var state : data.viewers.values()) {
             try {
                 final var text = this.plugin.tagTextResolver().resolve(state, frame.text());
                 final var opacity = state.hasSuppress(ViewerState.SUPPRESS_SNEAK)
                         ? transition.sneakOpacity() : transition.normalOpacity();
-                this.protocolManager.sendPacketSilently(state.channel,
-                        createMetadataPacket(data, transition.entries(), text, opacity, false));
+                if (!broadcast.send(this.protocolManager, state.channel, data.tagEntityId, text, true,
+                        opacity == null ? null : (Byte) opacity.getValue())) {
+                    this.protocolManager.sendPacketSilently(state.channel,
+                            createMetadataPacket(data, transition.metadata().entries(), text, opacity, false));
+                }
             } catch (RuntimeException failure) {
                 this.logMetadataFailure(state, data.currentFrame, "update frame", failure);
             }
@@ -295,9 +303,7 @@ public final class ModernRenderer implements TagRenderer {
                                                                  boolean initialization) {
         final var metadata = new ArrayList<EntityData<?>>(entries.size() + 2);
         metadata.addAll(entries);
-        if (!initialization || !Component.empty().equals(text)) {
-            metadata.add(new EntityData<>(this.textIndex, EntityDataTypes.ADV_COMPONENT, text));
-        }
+        if (!initialization || !Component.empty().equals(text)) metadata.add(this.textTemplate.textData(text));
         if (opacity != null) metadata.add(opacity);
         return new WrapperPlayServerEntityMetadata(data.tagEntityId, metadata);
     }
