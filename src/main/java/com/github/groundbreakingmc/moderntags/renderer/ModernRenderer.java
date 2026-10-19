@@ -8,6 +8,7 @@ import com.github.groundbreakingmc.moderntags.text.TagTextResolver;
 import com.github.groundbreakingmc.mylib.config.Config;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.manager.protocol.ProtocolManager;
+import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.netty.channel.ChannelHelper;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
@@ -20,6 +21,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.google.common.collect.ImmutableList;
 import io.github.retrooper.packetevents.util.SpigotReflectionUtil;
+import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -29,6 +31,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 
 /**
  * Renderer that spawns a client-side TEXT_DISPLAY entity that rides the target player.
@@ -37,7 +40,8 @@ import java.util.concurrent.TimeUnit;
  * {@link #targetData}, keyed by Player reference. All fields are accessed during drain
  * only (single writer, no synchronisation needed).
  *
- * <p>Spawn metadata includes the current sneak opacity.
+ * <p>Spawn metadata omits client defaults and applies the current sneak opacity.
+ * Frame transitions are compiled at configuration load, including the last-to-first transition.
  * {@link com.github.groundbreakingmc.moderntags.core.RenderLoop} uses {@link #updateOpacity}
  * to refresh it while the display remains rendered.
  */
@@ -45,13 +49,14 @@ public final class ModernRenderer implements TagRenderer {
 
     private static final int PASSENGER_DELAY_MS = 100;
     private static final double TAG_Y_OFFSET = 1.8;
-    private static final int TEXT_COMPONENT_INDEX = 23;
     private static final int TEXT_OPACITY_INDEX = 26;
 
     private final ModernTags plugin;
     private final int frameUpdateRate;
     private final int placeholdersUpdateRate;
     private final List<Frame> frames;
+    private final int textIndex;
+    private final List<Transition> transitions;
 
     /**
      * Per-target state. Plain map — drain-only access.
@@ -68,6 +73,32 @@ public final class ModernRenderer implements TagRenderer {
         this.frameUpdateRate = frames.size() > 1 ? frameUpdateRate : -1;
         this.placeholdersUpdateRate = placeholdersUpdateRate;
         this.frames = frames;
+        this.textIndex = PacketEvents.getAPI().getServerManager().getVersion().isOlderThan(ServerVersion.V_1_20_2) ? 22 : 23;
+        this.transitions = compileTransitions(frames);
+    }
+
+    private List<Transition> compileTransitions(List<Frame> frames) {
+        if (frames.size() <= 1) return List.of();
+        final var transitions = new ArrayList<Transition>(frames.size());
+        for (int i = 0; i < frames.size(); i++) {
+            final var previous = frames.get((i + frames.size() - 1) % frames.size());
+            final var current = frames.get(i);
+            final var changed = new ArrayList<EntityData<?>>();
+            for (int entry = 0; entry < current.entityData().size(); entry++) {
+                if (!Objects.equals(previous.entityData().get(entry).getValue(), current.entityData().get(entry).getValue())) {
+                    changed.add(current.entityData().get(entry));
+                }
+            }
+            final var normal = current.dataWithDefaultOpacity().getFirst();
+            final var sneak = current.dataWithSneakOpacity().getFirst();
+            transitions.add(new Transition(List.copyOf(changed),
+                    normal.getValue().equals(previous.dataWithDefaultOpacity().getFirst().getValue()) ? null : normal,
+                    sneak.getValue().equals(previous.dataWithSneakOpacity().getFirst().getValue()) ? null : sneak));
+        }
+        return transitions;
+    }
+
+    private record Transition(List<EntityData<?>> entries, EntityData<?> normalOpacity, EntityData<?> sneakOpacity) {
     }
 
     public static ModernRenderer of(@NotNull ModernTags plugin, @NotNull Config config) {
@@ -146,9 +177,14 @@ public final class ModernRenderer implements TagRenderer {
         final var frame = this.frames.get(data.currentFrame);
         // Frame settings and opacity remain on the client until their own update paths change them.
         for (final var pair : data.viewers.values()) {
-            this.protocolManager.sendPacketSilently(pair.channel,
-                    new WrapperPlayServerEntityMetadata(data.tagEntityId,
-                            List.of(this.createTextData(pair, frame))));
+            try {
+                final var text = this.plugin.tagTextResolver().resolve(pair, frame.text());
+                this.protocolManager.sendPacketSilently(pair.channel,
+                        new WrapperPlayServerEntityMetadata(data.tagEntityId,
+                                List.of(new EntityData<>(this.textIndex, EntityDataTypes.ADV_COMPONENT, text))));
+            } catch (RuntimeException failure) {
+                this.logMetadataFailure(pair, data.currentFrame, "update placeholders", failure);
+            }
         }
     }
 
@@ -213,10 +249,24 @@ public final class ModernRenderer implements TagRenderer {
 
     private void broadcastMetadata(@NotNull TargetData data) {
         final var frame = this.frames.get(data.currentFrame);
+        final var transition = this.transitions.get(data.currentFrame);
         for (final var state : data.viewers.values()) {
-            this.protocolManager.sendPacketSilently(state.channel,
-                    this.createMetadataPacket(state, data, frame));
+            try {
+                final var text = this.plugin.tagTextResolver().resolve(state, frame.text());
+                final var opacity = state.hasSuppress(ViewerState.SUPPRESS_SNEAK)
+                        ? transition.sneakOpacity() : transition.normalOpacity();
+                this.protocolManager.sendPacketSilently(state.channel,
+                        createMetadataPacket(data, transition.entries(), text, opacity, false));
+            } catch (RuntimeException failure) {
+                this.logMetadataFailure(state, data.currentFrame, "update frame", failure);
+            }
         }
+    }
+
+    private void logMetadataFailure(ViewerState state, int frame, String operation, RuntimeException failure) {
+        this.plugin.getLogger().log(Level.SEVERE, "Failed to " + operation
+                + " for tag owner=" + state.target.getUniqueId()
+                + ", viewer=" + state.viewer.getUniqueId() + ", frame=" + (frame + 1), failure);
     }
 
     private static WrapperPlayServerSpawnEntity createSpawnPacket(int entityId,
@@ -231,17 +281,25 @@ public final class ModernRenderer implements TagRenderer {
     private WrapperPlayServerEntityMetadata createMetadataPacket(@NotNull ViewerState state,
                                                                  @NotNull TargetData data,
                                                                  @NotNull Frame frame) {
-        final var metadata = new ArrayList<EntityData<?>>(frame.entityData().size() + 2);
-        metadata.addAll(frame.entityData());
-        metadata.add(this.createTextData(state, frame));
-        metadata.add(state.hasSuppress(ViewerState.SUPPRESS_SNEAK)
-                ? frame.dataWithSneakOpacity().getFirst() : frame.dataWithDefaultOpacity().getFirst());
-        return new WrapperPlayServerEntityMetadata(data.tagEntityId, metadata);
+        final var text = this.plugin.tagTextResolver().resolve(state, frame.text());
+        final var opacity = state.hasSuppress(ViewerState.SUPPRESS_SNEAK)
+                ? frame.dataWithSneakOpacity().getFirst() : frame.dataWithDefaultOpacity().getFirst();
+        return createMetadataPacket(data, frame.initialData, text,
+                (Byte) opacity.getValue() == -1 ? null : opacity, true);
     }
 
-    private EntityData<?> createTextData(@NotNull ViewerState state, @NotNull Frame frame) {
-        return new EntityData<>(TEXT_COMPONENT_INDEX, EntityDataTypes.ADV_COMPONENT,
-                this.plugin.tagTextResolver().resolve(state, frame.text()));
+    private WrapperPlayServerEntityMetadata createMetadataPacket(@NotNull TargetData data,
+                                                                 @NotNull List<EntityData<?>> entries,
+                                                                 @NotNull Component text,
+                                                                 EntityData<?> opacity,
+                                                                 boolean initialization) {
+        final var metadata = new ArrayList<EntityData<?>>(entries.size() + 2);
+        metadata.addAll(entries);
+        if (!initialization || !Component.empty().equals(text)) {
+            metadata.add(new EntityData<>(this.textIndex, EntityDataTypes.ADV_COMPONENT, text));
+        }
+        if (opacity != null) metadata.add(opacity);
+        return new WrapperPlayServerEntityMetadata(data.tagEntityId, metadata);
     }
 
     private static WrapperPlayServerSetPassengers createSetPassengersWithTag(
@@ -276,13 +334,38 @@ public final class ModernRenderer implements TagRenderer {
         private final List<EntityData<?>> dataWithDefaultOpacity;
         private final List<EntityData<?>> dataWithSneakOpacity;
         private final List<EntityData<?>> entityData;
+        private final List<EntityData<?>> initialData;
 
         Frame(@NotNull Text<ViewerState> text, byte defaultTextOpacity, byte sneakTextOpacity,
               @NotNull List<EntityData<?>> entityData) {
             this.text = text;
-            this.dataWithDefaultOpacity = List.of(new EntityData<>(TEXT_OPACITY_INDEX, EntityDataTypes.BYTE, defaultTextOpacity));
-            this.dataWithSneakOpacity = List.of(new EntityData<>(TEXT_OPACITY_INDEX, EntityDataTypes.BYTE, sneakTextOpacity));
-            this.entityData = ImmutableList.copyOf(entityData);
+            final var version = PacketEvents.getAPI().getServerManager().getVersion();
+            final int offset = version.isOlderThan(ServerVersion.V_1_20_2) ? -1 : 0;
+            this.dataWithDefaultOpacity = List.of(new EntityData<>(TEXT_OPACITY_INDEX + offset, EntityDataTypes.BYTE, defaultTextOpacity));
+            this.dataWithSneakOpacity = List.of(new EntityData<>(TEXT_OPACITY_INDEX + offset, EntityDataTypes.BYTE, sneakTextOpacity));
+            this.entityData = offset == 0 ? ImmutableList.copyOf(entityData)
+                    : entityData.stream().<EntityData<?>>map(entry -> shiftedEntry(entry, offset)).toList();
+            this.initialData = this.entityData.stream()
+                    .filter(entry -> !Objects.equals(entry.getValue(), clientDefault(entry.getIndex() - offset)))
+                    .toList();
+        }
+
+        private static <T> EntityData<T> shiftedEntry(EntityData<T> entry, int offset) {
+            return new EntityData<>(entry.getIndex() + offset, entry.getType(), entry.getValue());
+        }
+
+        private static Object clientDefault(int index) {
+            return switch (index) {
+                case 11 -> new Vector3f(0f, 0f, 0f);
+                case 12 -> new Vector3f(1f, 1f, 1f);
+                case 15, 27 -> (byte) 0;
+                case 16 -> -1;
+                case 17, 19 -> 1f;
+                case 18 -> 0f;
+                case 24 -> 200;
+                case 25 -> 0x40000000;
+                default -> throw new IllegalArgumentException("Unknown TextDisplay metadata index: " + index);
+            };
         }
 
         public Text<ViewerState> text() {
