@@ -30,6 +30,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -127,11 +128,13 @@ public final class RenderLoop {
     private final List<ViewerState> reuseLegacyStates = new ArrayList<>();
     private final List<String> reuseUnmanagedNames = new ArrayList<>();
 
+    private final Predicate<ViewerState> currentRenderedPair = state -> state.rendered
+            && this.states.get(key(state.target, state.viewer)) == state;
+
     /**
-     * Targets visited per renderer during a tick. Sets are reused between ticks
-     * and cleared after each traversal so they do not retain players.
+     * Renderers bound during this lifecycle; unused configured renderers are never visited.
      */
-    private final Map<TagRenderer, Set<Player>> tickSeen = new IdentityHashMap<>(32);
+    private final Set<TagRenderer> tickRenderers = Collections.newSetFromMap(new IdentityHashMap<>(32));
 
     private final ProtocolManager protocolManager = PacketEvents.getAPI().getProtocolManager();
 
@@ -389,6 +392,7 @@ public final class RenderLoop {
                 }
             }
             state.rendered = true;
+            this.tickRenderers.add(state.renderer);
         } else if (state.renderer instanceof ModernRenderer modern) {
             modern.updateOpacity(state);
         }
@@ -842,7 +846,7 @@ public final class RenderLoop {
         this.states.clear();
         this.viewerIndex.clear();
         this.targetIndex.clear();
-        this.tickSeen.clear();
+        this.tickRenderers.clear();
         // Keep name hiding during reload; remove our fallback teams when disabling the plugin.
         if (shutdown) {
             for (final var viewer : Bukkit.getOnlinePlayers()) {
@@ -892,28 +896,8 @@ public final class RenderLoop {
             this.recheckConditions();
         }
 
-        // Advance each target once per renderer, regardless of its viewer count.
-        try {
-            for (final var state : this.states.values()) {
-                if (!state.rendered || state.renderer == null) continue;
-                if (!this.tickSeen.computeIfAbsent(state.renderer,
-                                renderer -> Collections.newSetFromMap(new IdentityHashMap<>()))
-                        .add(state.target)) continue;
-
-                final int frameRate = state.renderer.frameUpdateRate();
-                if (frameRate > 0 && currentTick % frameRate == 0) {
-                    state.renderer.updateFrame(state);
-                    continue;
-                }
-                final int placeholderRate = state.renderer.placeholdersUpdateRate();
-                if (placeholderRate > 0 && currentTick % placeholderRate == 0) {
-                    state.renderer.updatePlaceholders(state);
-                }
-            }
-        } finally {
-            for (final var targets : this.tickSeen.values()) {
-                targets.clear();
-            }
+        for (final var renderer : this.tickRenderers) {
+            renderer.tick(currentTick, this.currentRenderedPair);
         }
     }
 

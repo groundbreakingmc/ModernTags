@@ -31,6 +31,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 
 /**
@@ -174,6 +175,10 @@ public final class ModernRenderer implements TagRenderer {
     public void updatePlaceholders(@NotNull ViewerState state) {
         final var data = this.targetData.get(state.target);
         if (data == null) return;
+        this.broadcastText(data);
+    }
+
+    private void broadcastText(@NotNull TargetData data) {
         final var frame = this.frames.get(data.currentFrame);
         final var broadcast = new MetadataTemplate.Broadcast(this.textTemplate);
         // Frame settings and opacity remain on the client until their own update paths change them.
@@ -207,14 +212,36 @@ public final class ModernRenderer implements TagRenderer {
         }
     }
 
+    /**
+     * Advances each due target once, using its existing viewer registrations.
+     * Targets without an authoritative rendered viewer keep their current frame.
+     *
+     * @param currentTick the update manager's local tick
+     * @param isCurrent   whether a registered pair is still authoritative and rendered
+     */
     @Override
-    public int frameUpdateRate() {
-        return this.frameUpdateRate;
-    }
+    public void tick(int currentTick, @NotNull Predicate<ViewerState> isCurrent) {
+        final boolean advanceFrame = this.frameUpdateRate > 0 && currentTick % this.frameUpdateRate == 0;
+        final boolean refreshText = !advanceFrame && this.placeholdersUpdateRate > 0
+                && currentTick % this.placeholdersUpdateRate == 0;
+        if (!advanceFrame && !refreshText) return;
 
-    @Override
-    public int placeholdersUpdateRate() {
-        return this.placeholdersUpdateRate;
+        for (final var data : this.targetData.values()) {
+            boolean hasCurrentViewer = false;
+            for (final var state : data.viewers.values()) {
+                if (state.renderer == this && isCurrent.test(state)) {
+                    hasCurrentViewer = true;
+                    break;
+                }
+            }
+            if (!hasCurrentViewer) continue;
+            if (advanceFrame) {
+                data.currentFrame = (data.currentFrame + 1) % this.frames.size();
+                this.broadcastMetadata(data);
+            } else {
+                this.broadcastText(data);
+            }
+        }
     }
 
     /**

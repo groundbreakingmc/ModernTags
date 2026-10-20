@@ -13,7 +13,9 @@ import net.kyori.adventure.text.Component;
 
 import java.util.List;
 
-/** Native TextDisplay metadata, with frame settings compiled by PacketEvents. */
+/**
+ * Native TextDisplay metadata, with frame settings compiled by PacketEvents.
+ */
 final class MetadataTemplate {
 
     private final ServerVersion version;
@@ -76,7 +78,9 @@ final class MetadataTemplate {
         ByteBufHelper.writeByte(buffer, 255);
     }
 
-    /** One traversal only: providers still run before every send. */
+    /**
+     * One traversal only: providers still run before every send.
+     */
     static final class Broadcast {
 
         private final MetadataTemplate template;

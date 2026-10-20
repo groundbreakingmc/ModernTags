@@ -19,6 +19,7 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
+import java.util.function.Predicate;
 import java.util.function.ToIntBiFunction;
 
 import static com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.ObjectiveMode;
@@ -263,14 +264,32 @@ public final class LegacyRenderer implements TagRenderer {
         }
     }
 
+    /**
+     * Advances each due target once, using its existing viewer registrations.
+     * Hidden or orphaned registrations cannot start a target update themselves.
+     *
+     * @param currentTick the update manager's local tick
+     * @param isCurrent   whether a registered pair is still authoritative and rendered
+     */
     @Override
-    public int frameUpdateRate() {
-        return this.frameUpdateRate;
-    }
+    public void tick(int currentTick, @NotNull Predicate<ViewerState> isCurrent) {
+        final boolean advanceFrame = this.frameUpdateRate > 0 && currentTick % this.frameUpdateRate == 0;
+        final boolean refreshText = !advanceFrame && this.placeholdersUpdateRate > 0
+                && currentTick % this.placeholdersUpdateRate == 0;
+        if (!advanceFrame && !refreshText) return;
 
-    @Override
-    public int placeholdersUpdateRate() {
-        return this.placeholdersUpdateRate;
+        for (final var data : this.targetData.values()) {
+            boolean hasCurrentViewer = false;
+            for (final var state : data.viewers.values()) {
+                if (state.renderer == this && isCurrent.test(state)) {
+                    hasCurrentViewer = true;
+                    break;
+                }
+            }
+            if (!hasCurrentViewer) continue;
+            if (advanceFrame) data.currentFrame = (data.currentFrame + 1) % this.frames.size();
+            this.broadcastFullUpdate(data);
+        }
     }
 
     /**

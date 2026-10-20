@@ -4,6 +4,8 @@ import com.github.groundbreakingmc.moderntags.core.ViewerState;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.function.Predicate;
+
 /**
  * Sealed renderer interface implemented by {@link ModernRenderer} and {@link LegacyRenderer}.
  *
@@ -55,7 +57,12 @@ public sealed interface TagRenderer permits ModernRenderer, LegacyRenderer {
      */
     void cleanup(@NotNull Player player);
 
-    int frameUpdateRate();
-
-    int placeholdersUpdateRate();
+    /**
+     * Updates due targets directly from this renderer's viewer registrations.
+     * Called during drain with the same local tick used for condition rechecks.
+     *
+     * @param currentTick the update manager's local tick
+     * @param isCurrent   whether a registered pair is still authoritative and rendered
+     */
+    void tick(int currentTick, @NotNull Predicate<ViewerState> isCurrent);
 }
