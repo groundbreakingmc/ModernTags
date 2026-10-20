@@ -129,10 +129,9 @@ public final class ModernRenderer implements TagRenderer {
         // Validate delayed attachment on the render loop after the client has processed the spawn.
         final var renderLoop = this.plugin.renderLoop();
         final var attachment = new RenderTask.AttachTag(
-                state, state.renderGeneration, this, data.tagEntityId);
+                state, this, data.tagEntityId);
         state.pendingAttach = attachment;
         Bukkit.getAsyncScheduler().runDelayed(this.plugin, task -> {
-            attachment.ready().set(true);
             renderLoop.post(attachment);
         }, PASSENGER_DELAY_MS, TimeUnit.MILLISECONDS);
 
@@ -140,7 +139,7 @@ public final class ModernRenderer implements TagRenderer {
     }
 
     /**
-     * Attaches a current tag after the render loop validates its state and generation.
+     * Attaches a current tag after the render loop validates its pending identity.
      * Called only during drain, which owns target data and viewer membership.
      */
     public void attachPassengers(@NotNull ViewerState state, int tagEntityId) {

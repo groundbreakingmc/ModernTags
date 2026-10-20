@@ -71,11 +71,6 @@ public final class ViewerState {
     public boolean tracked;
 
     /**
-     * Invalidates delayed operations whenever this pair's rendering changes.
-     */
-    public long renderGeneration;
-
-    /**
      * Current delayed native spawn; the reference is owned by the render loop.
      */
     public @Nullable RenderTask.RenderWhenCurrent pendingSpawn;

@@ -8,13 +8,12 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Sealed task hierarchy posted to {@link RenderLoop} from any thread.
  *
  * <p>Tasks carry events and delayed-operation tokens. Mutable rendering state is
- * accessed only during drain; delayed callbacks publish readiness and post their token.
+ * accessed only during drain; delayed callbacks post their token after its delay.
  */
 public sealed interface RenderTask permits
         RenderTask.AttachTag,
@@ -64,28 +63,15 @@ public sealed interface RenderTask permits
                           @NotNull Plugin plugin) implements RenderTask {}
 
     /**
-     * The readiness marker is the only field published by the scheduler callback.
+     * Posted only by the delayed callback; pending identity validates its lifetime.
      */
-    record RenderWhenCurrent(@NotNull ViewerState state, long generation,
-                             @NotNull AtomicBoolean ready) implements RenderTask {
-
-        public RenderWhenCurrent(@NotNull ViewerState state, long generation) {
-            this(state, generation, new AtomicBoolean());
-        }
-    }
+    record RenderWhenCurrent(@NotNull ViewerState state) implements RenderTask {}
 
     /**
-     * A delayed attachment is valid only for the renderer and generation that spawned it.
+     * A delayed attachment is valid only while it remains the pair's pending operation.
      */
-    record AttachTag(@NotNull ViewerState state, long generation,
-                     @NotNull ModernRenderer renderer, int tagEntityId,
-                     @NotNull AtomicBoolean ready) implements RenderTask {
-
-        public AttachTag(@NotNull ViewerState state, long generation,
-                         @NotNull ModernRenderer renderer, int tagEntityId) {
-            this(state, generation, renderer, tagEntityId, new AtomicBoolean());
-        }
-    }
+    record AttachTag(@NotNull ViewerState state, @NotNull ModernRenderer renderer,
+                     int tagEntityId) implements RenderTask {}
 
     /**
      * Ends native player tracking and cancels rendering, including a pending spawn.

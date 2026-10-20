@@ -23,7 +23,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
 import org.jctools.queues.MessagePassingQueue;
-import org.jctools.queues.MpscArrayQueue;
+import org.jctools.queues.MpscUnboundedArrayQueue;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -64,9 +64,9 @@ import java.util.logging.Logger;
 public final class RenderLoop {
 
     /**
-     * Must be a power of 2. 4096 covers burst traffic on large servers.
+     * Initial linked-array chunk size; backlog is limited by available heap.
      */
-    private static final int QUEUE_CAPACITY = 4096;
+    private static final int QUEUE_INITIAL_CAPACITY = 128;
 
     private static final String HIDDEN_TEAM_PREFIX = "MT-H-";
     private static final ScoreBoardTeamInfo HIDDEN_TEAM_INFO =
@@ -76,7 +76,7 @@ public final class RenderLoop {
                     CollisionRule.ALWAYS,
                     NamedTextColor.WHITE, OptionData.NONE);
 
-    private final MessagePassingQueue<RenderTask> queue = new MpscArrayQueue<>(QUEUE_CAPACITY);
+    private final MessagePassingQueue<RenderTask> queue = new MpscUnboundedArrayQueue<>(QUEUE_INITIAL_CAPACITY);
     private final AtomicBoolean draining = new AtomicBoolean(false);
     private final Logger logger;
 
@@ -157,7 +157,7 @@ public final class RenderLoop {
 
     /**
      * Enqueues a task and attempts to drain the queue on the calling thread.
-     * Tasks are dropped when the queue is full (capacity {@value QUEUE_CAPACITY}).
+     * Tasks remain queued until consumed, subject to JVM resource failure.
      */
     public void post(@NotNull RenderTask task) {
         this.queue.offer(task);
@@ -243,10 +243,7 @@ public final class RenderLoop {
             return;
         }
         if (state == null || !state.tracked) return;
-        if (state.pendingSpawn != null) {
-            this.handleRenderWhenCurrent(state.pendingSpawn);
-            return;
-        }
+        if (state.pendingSpawn != null) return;
         this.handleRender(state);
     }
 
@@ -254,11 +251,10 @@ public final class RenderLoop {
         final var state = this.getOrCreate(spawn.target(), spawn.viewer());
         this.handleStop(state);
         state.tracked = true;
-        final var pending = new RenderTask.RenderWhenCurrent(state, state.renderGeneration);
+        final var pending = new RenderTask.RenderWhenCurrent(state);
         state.pendingSpawn = pending;
         try {
             Bukkit.getAsyncScheduler().runDelayed(spawn.plugin(), task -> {
-                pending.ready().set(true);
                 this.post(pending);
             }, 1L, TimeUnit.MILLISECONDS);
         } catch (RuntimeException ex) {
@@ -270,8 +266,7 @@ public final class RenderLoop {
 
     private void handleRenderWhenCurrent(@NotNull RenderTask.RenderWhenCurrent pending) {
         final var state = pending.state();
-        if (state.pendingSpawn != pending || !pending.ready().get()
-                || state.renderGeneration != pending.generation() || !state.tracked
+        if (state.pendingSpawn != pending || !state.tracked
                 || this.states.get(key(state.target, state.viewer)) != state) return;
         state.pendingSpawn = null;
         this.handleRender(state);
@@ -279,8 +274,7 @@ public final class RenderLoop {
 
     private void handleAttach(@NotNull RenderTask.AttachTag attachment) {
         final var state = attachment.state();
-        if (state.pendingAttach != attachment || !attachment.ready().get()
-                || state.renderGeneration != attachment.generation()
+        if (state.pendingAttach != attachment
                 || !state.active || !state.rendered || state.renderer != attachment.renderer()
                 || this.states.get(key(state.target, state.viewer)) != state) return;
         state.pendingAttach = null;
@@ -297,7 +291,6 @@ public final class RenderLoop {
     }
 
     private void invalidateRender(@NotNull ViewerState state) {
-        state.renderGeneration++;
         state.pendingSpawn = null;
         state.pendingAttach = null;
     }
@@ -902,13 +895,6 @@ public final class RenderLoop {
         // Advance each target once per renderer, regardless of its viewer count.
         try {
             for (final var state : this.states.values()) {
-                // Recover ready callbacks even if their queue offer was dropped during a burst.
-                if (state.pendingSpawn != null && state.pendingSpawn.ready().get()) {
-                    this.handleRenderWhenCurrent(state.pendingSpawn);
-                }
-                if (state.pendingAttach != null && state.pendingAttach.ready().get()) {
-                    this.handleAttach(state.pendingAttach);
-                }
                 if (!state.rendered || state.renderer == null) continue;
                 if (!this.tickSeen.computeIfAbsent(state.renderer,
                                 renderer -> Collections.newSetFromMap(new IdentityHashMap<>()))
