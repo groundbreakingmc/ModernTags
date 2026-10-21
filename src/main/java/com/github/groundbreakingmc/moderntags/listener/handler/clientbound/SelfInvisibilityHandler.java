@@ -16,6 +16,16 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRe
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Tracks invisibility effects affecting a player's own tag.
+ *
+ * <p>Only modern clients (1.19.4+) require explicit suppression.
+ * Legacy clients rely on native nametag visibility.
+ *
+ * <p>Previously decoded packet wrappers are reused to preserve modifications
+ * made by earlier listeners. Otherwise, the packet is inspected directly
+ * without allocating a wrapper.
+ */
 public final class SelfInvisibilityHandler implements ClientBoundPacketHandler {
 
     private static final int INVISIBILITY_EFFECT_ID = PotionTypes.INVISIBILITY.getId(
@@ -27,6 +37,12 @@ public final class SelfInvisibilityHandler implements ClientBoundPacketHandler {
         this.renderLoop = renderLoop;
     }
 
+    /**
+     * Processes outgoing effect packets and updates the viewer's self-tag
+     * suppression state when their own invisibility changes.
+     *
+     * @param event the outgoing packet event
+     */
     @Override
     public void handle(@NotNull PacketSendEvent event) {
         // Legacy clients handle invisibility through native nametags.
@@ -59,6 +75,16 @@ public final class SelfInvisibilityHandler implements ClientBoundPacketHandler {
                 viewer, viewer, ViewerState.SUPPRESS_INVISIBLE, added));
     }
 
+    /**
+     * Checks whether the packet targets the given entity with an invisibility effect.
+     *
+     * <p>Reads directly from the packet buffer without allocating a wrapper.
+     * The original reader index is always restored, including when decoding fails.
+     *
+     * @param buffer   the packet's underlying byte buffer
+     * @param entityId the entity ID to match
+     * @return {@code true} if the packet targets the entity with invisibility
+     */
     private static boolean isSelfInvisibility(Object buffer, int entityId) {
         final int index = ByteBufHelper.readerIndex(buffer);
 
