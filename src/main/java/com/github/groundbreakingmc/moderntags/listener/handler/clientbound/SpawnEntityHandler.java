@@ -8,7 +8,6 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -22,14 +21,16 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class SpawnEntityHandler implements ClientBoundPacketHandler {
 
+
     private final ModernTags plugin;
     private final RenderLoop renderLoop;
-    private final ClientVersion serverVersion;
+    private final int playerEntityTypeId;
 
     public SpawnEntityHandler(@NotNull ModernTags plugin, @NotNull RenderLoop renderLoop) {
         this.plugin = plugin;
         this.renderLoop = renderLoop;
-        this.serverVersion = PacketEvents.getAPI().getServerManager().getVersion().toClientVersion();
+        this.playerEntityTypeId = EntityTypes.PLAYER.getId(
+                PacketEvents.getAPI().getServerManager().getVersion().toClientVersion());
     }
 
     @Override
@@ -44,7 +45,7 @@ public final class SpawnEntityHandler implements ClientBoundPacketHandler {
 
         // SPAWN_PLAYER carries no entity-type field before its coordinates.
         if (event.getPacketType() != PacketType.Play.Server.SPAWN_PLAYER
-                && EntityTypes.getById(this.serverVersion, wrapper.readVarInt()) != EntityTypes.PLAYER) return;
+                && wrapper.readVarInt() != this.playerEntityTypeId) return;
 
         final var target = Bukkit.getPlayer(uniqueId);
         if (target == null) return;
