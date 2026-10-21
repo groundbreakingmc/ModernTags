@@ -23,7 +23,6 @@ public final class PacketListener extends PacketListenerAbstract {
     private final DestroyEntitiesHandler destroyEntities;
     private final DeathHandler death;
     private final PlayerInfoUpdateHandler playerInfoUpdate;
-    private final PlayerInfoRemoveHandler playerInfoRemove;
     private final SetPassengersHandler setPassengers;
     private final SelfInvisibilityHandler selfInvisibility;
     private final EntityMetadataHandler entityMetadata;
@@ -37,7 +36,6 @@ public final class PacketListener extends PacketListenerAbstract {
         this.destroyEntities = new DestroyEntitiesHandler(renderLoop);
         this.death = new DeathHandler(renderLoop);
         this.playerInfoUpdate = new PlayerInfoUpdateHandler(renderLoop);
-        this.playerInfoRemove = new PlayerInfoRemoveHandler(renderLoop);
         this.setPassengers = new SetPassengersHandler(renderLoop);
         this.selfInvisibility = new SelfInvisibilityHandler(renderLoop);
         this.entityMetadata = new EntityMetadataHandler(renderLoop);
@@ -66,7 +64,6 @@ public final class PacketListener extends PacketListenerAbstract {
             case DESTROY_ENTITIES -> this.destroyEntities.handle(event);
             case ENTITY_STATUS -> this.death.handle(event);
             case PLAYER_INFO_UPDATE -> this.playerInfoUpdate.handle(event);
-            case PLAYER_INFO_REMOVE -> this.playerInfoRemove.handle(event);
             case SET_PASSENGERS -> this.setPassengers.handle(event);
             case ENTITY_EFFECT, REMOVE_ENTITY_EFFECT -> this.selfInvisibility.handle(event);
             case ENTITY_METADATA -> this.entityMetadata.handle(event);

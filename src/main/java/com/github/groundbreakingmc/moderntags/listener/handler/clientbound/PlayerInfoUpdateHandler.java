@@ -10,8 +10,7 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Refreshes tracked tags on PLAYER_INFO_UPDATE.
- * Game-mode updates also refresh invisibility and the viewer's spectator visibility.
+ * Refreshes game-mode visibility independently of tab-list profile membership.
  */
 public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
 
@@ -27,7 +26,7 @@ public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
     }
 
     /**
-     * Refreshes tracked tags for player additions and game-mode changes.
+     * Refreshes tracked tags for game-mode changes; profile membership does not change tracking.
      *
      * @param event the outgoing player-info update
      */
@@ -37,19 +36,14 @@ public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
         if (packet.getEntries().isEmpty()) return;
 
         final var actions = packet.getActions();
-        final boolean addPlayer = actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER);
         final boolean updateGameMode = actions.contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE);
-        if (!addPlayer && !updateGameMode) return;
+        if (!updateGameMode) return;
 
         final Player viewer = event.getPlayer();
         for (final var entry : packet.getEntries()) {
             final var target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
             if (target == null) continue;
-            if (updateGameMode) {
-                this.renderLoop.post(new RenderTask.GameModeUpdate(target, viewer));
-            } else {
-                this.renderLoop.post(new RenderTask.RenderIfTracked(target, viewer));
-            }
+            this.renderLoop.post(new RenderTask.GameModeUpdate(target, viewer));
         }
     }
 }
