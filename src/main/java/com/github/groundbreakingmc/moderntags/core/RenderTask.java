@@ -23,7 +23,6 @@ public sealed interface RenderTask permits
         RenderTask.InvalidateAll,
         RenderTask.PassengersUpdate,
         RenderTask.Render,
-        RenderTask.RenderIfTracked,
         RenderTask.ScheduleRender,
         RenderTask.RenderWhenCurrent,
         RenderTask.StopTracking,
@@ -41,11 +40,6 @@ public sealed interface RenderTask permits
      * Stop rendering and destroy the client-side tag entity.
      */
     record StopRendering(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
-
-    /**
-     * Refreshes an existing tracked pair; tab-list membership alone does not establish tracking.
-     */
-    record RenderIfTracked(@NotNull Player target, @NotNull Player viewer) implements RenderTask {}
 
     /**
      * Refreshes tracked tag visibility after a player's game mode changes.

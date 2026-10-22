@@ -192,9 +192,6 @@ public final class RenderLoop {
     private void processTask(@NotNull RenderTask task) {
         switch (task) {
             case RenderTask.Render(var target, var viewer) -> this.handleRender(this.getOrCreate(target, viewer));
-            case RenderTask.RenderIfTracked(var target, var viewer) ->
-                    this.handleRenderIfTracked(target, viewer, target == viewer
-                            ? this.getOrCreate(target, viewer) : this.states.get(key(target, viewer)));
             case RenderTask.GameModeUpdate(var target, var viewer) -> this.handleGameModeUpdate(target, viewer);
             case RenderTask.AttachTag attachment -> this.handleAttach(attachment);
             case RenderTask.ScheduleRender spawn -> this.handleScheduleRender(spawn);
