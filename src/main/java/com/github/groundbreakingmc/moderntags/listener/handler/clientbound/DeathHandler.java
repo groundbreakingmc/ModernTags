@@ -24,13 +24,17 @@ public final class DeathHandler implements ClientBoundPacketHandler {
 
     @Override
     public void handle(@NotNull PacketSendEvent event) {
-        final var packet = new WrapperPlayServerEntityStatus(event);
+        // Preserve prior status edits and avoid decoding an already available wrapper.
+        final var previous = event.getLastUsedWrapper();
+        final var packet = previous instanceof WrapperPlayServerEntityStatus status
+                ? status : new WrapperPlayServerEntityStatus(event);
         if (packet.getStatus() != DEATH_STATUS) return;
 
         final Player viewer = event.getPlayer();
-        final Player target = viewer.getEntityId() == packet.getEntityId()
+        final int entityId = packet.getEntityId();
+        final Player target = viewer.getEntityId() == entityId
                 ? viewer
-                : PlayerLookup.playerById(packet.getEntityId());
+                : PlayerLookup.playerById(entityId);
         if (target == null) return;
 
         this.renderLoop.post(new RenderTask.StopRendering(target, viewer));
