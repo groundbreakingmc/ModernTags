@@ -7,6 +7,7 @@ import com.github.groundbreakingmc.moderntags.core.ViewerState;
 import com.github.groundbreakingmc.moderntags.listener.handler.ServerBoundPacketHandler;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
@@ -29,16 +30,22 @@ public final class InputHandler implements ServerBoundPacketHandler {
 
     @Override
     public void handle(@NotNull PacketReceiveEvent event) {
-        final Object buffer = event.getByteBuf();
-        final int readerIndex = ByteBufHelper.readerIndex(buffer);
+        final var previous = event.getLastUsedWrapper();
 
         final boolean sneaking;
-        try {
-            // PLAYER_INPUT contains a single byte of input flags.
-            sneaking = (ByteBufHelper.readByte(buffer) & SNEAK_FLAG) != 0;
-        } finally {
-            // PacketEvents and later listeners must see the original buffer position.
-            ByteBufHelper.readerIndex(buffer, readerIndex);
+        if (previous instanceof WrapperPlayClientPlayerInput packet) {
+            sneaking = packet.isShift();
+        } else {
+            final Object buffer = event.getByteBuf();
+            final int readerIndex = ByteBufHelper.readerIndex(buffer);
+
+            try {
+                // PLAYER_INPUT contains a single byte of input flags.
+                sneaking = (ByteBufHelper.readByte(buffer) & SNEAK_FLAG) != 0;
+            } finally {
+                // PacketEvents and later listeners must see the original buffer position.
+                ByteBufHelper.readerIndex(buffer, readerIndex);
+            }
         }
 
         // Serverbound sneaking actions always belong to the sender.
