@@ -926,16 +926,25 @@ public final class RenderLoop {
     @Nullable
     private TagRenderer resolveRenderer(@NotNull Player target, @NotNull Player viewer) {
         if (this.groups.isEmpty()) return null;
+
         final var targetContext = new Context(target);
+        Context viewerContext = null;
+
         for (final var group : this.groups) {
             if (!group.passCondition(targetContext)) continue;
-            final var viewerContext = new Context(viewer);
+
+            // Create the viewer context only when a matching group needs it.
+            if (viewerContext == null) {
+                viewerContext = new Context(viewer);
+            }
+
             for (final var entry : group.entries()) {
                 if (entry.passCondition(viewerContext)) {
                     return entry.rendererFor(viewer);
                 }
             }
         }
+
         return null;
     }
 
