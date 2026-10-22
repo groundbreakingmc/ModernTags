@@ -44,21 +44,17 @@ public final class EntityMetadataHandler implements ClientBoundPacketHandler {
     public void handle(@NotNull PacketSendEvent event) {
         if (event.getUser().getClientVersion().isOlderThan(ClientVersion.V_1_19_4)) return;
 
-        WrapperPlayServerEntityMetadata packet = null;
-        final int entityId;
-        if (event.getLastUsedWrapper() != null) {
-            // Bind earlier metadata edits to this event's buffer and protocol context.
-            packet = new WrapperPlayServerEntityMetadata(event);
-            entityId = packet.getEntityId();
-        } else {
-            entityId = readEntityId(event.getByteBuf());
-        }
+        // Reuse earlier metadata edits, but never interpret an unrelated wrapper as metadata.
+        final var previous = event.getLastUsedWrapper();
+        final var decoded = previous instanceof WrapperPlayServerEntityMetadata metadata ? metadata : null;
+        // Avoid decoding the metadata list for irrelevant entities.
+        final int entityId = decoded != null ? decoded.getEntityId() : readEntityId(event.getByteBuf());
 
         final Player viewer = event.getPlayer();
         if (viewer.getEntityId() == entityId) return;
         final var target = PlayerLookup.playerById(entityId);
         if (target == null) return;
-        if (packet == null) packet = new WrapperPlayServerEntityMetadata(event);
+        final var packet = decoded != null ? decoded : new WrapperPlayServerEntityMetadata(event);
 
         byte changedMask = 0;
         byte values = 0;
