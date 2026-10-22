@@ -22,7 +22,10 @@ public final class DestroyEntitiesHandler implements ClientBoundPacketHandler {
 
     @Override
     public void handle(@NotNull PacketSendEvent event) {
-        final var packet = new WrapperPlayServerDestroyEntities(event);
+        // Reuse earlier entity-ID edits instead of decoding the destruction list again.
+        final var previous = event.getLastUsedWrapper();
+        final var packet = previous instanceof WrapperPlayServerDestroyEntities destroy
+                ? destroy : new WrapperPlayServerDestroyEntities(event);
         final Player viewer = event.getPlayer();
         for (final int entityId : packet.getEntityIds()) {
             final var target = PlayerLookup.playerById(entityId);
