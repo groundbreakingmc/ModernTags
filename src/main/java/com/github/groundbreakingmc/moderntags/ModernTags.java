@@ -15,6 +15,7 @@ import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
 import com.github.groundbreakingmc.mylib.updateschecker.UpdatesChecker;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerCommon;
+import net.luckperms.api.LuckPerms;
 import net.milkbowl.vault.chat.Chat;
 import org.bstats.bukkit.Metrics;
 import org.bukkit.Bukkit;
@@ -61,11 +62,13 @@ public final class ModernTags extends JavaPlugin {
                 new PacketListener(this, this.renderLoop)
         );
 
-        final var lp = getServer().getServicesManager()
-                .getRegistration(net.luckperms.api.LuckPerms.class);
-        if (lp != null) {
-            this.luckPermsListener = new LuckPermsListener(this, this.renderLoop, lp.getProvider());
-            this.luckPermsListener.register();
+        if (super.getServer().getPluginManager().getPlugin("LuckPerms") != null) {
+            final var lp =
+                    super.getServer().getServicesManager().getRegistration(LuckPerms.class);
+            if (lp != null) {
+                this.luckPermsListener = new LuckPermsListener(this, this.renderLoop, lp.getProvider());
+                this.luckPermsListener.register();
+            }
         }
 
         final var updatesChecker = new UpdatesChecker(this,
@@ -78,11 +81,13 @@ public final class ModernTags extends JavaPlugin {
                 this.renderLoop.post(new RenderTask.InitializeAll()));
 
         // Resolve Vault async — services may not be registered yet at this point.
-        Bukkit.getAsyncScheduler().runNow(this, task -> {
-            final var chatRegistration =
-                    getServer().getServicesManager().getRegistration(Chat.class);
-            if (chatRegistration != null) this.tagTextResolver.chat(chatRegistration.getProvider());
-        });
+        if (super.getServer().getPluginManager().isPluginEnabled("Vault")) {
+            Bukkit.getAsyncScheduler().runNow(this, task -> {
+                final var chatRegistration =
+                        super.getServer().getServicesManager().getRegistration(Chat.class);
+                if (chatRegistration != null) this.tagTextResolver.chat(chatRegistration.getProvider());
+            });
+        }
 
         this.metrics = new Metrics(this, 34701);
         if (this.configValues.checkForUpdates()) {

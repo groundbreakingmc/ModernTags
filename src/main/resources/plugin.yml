@@ -8,7 +8,7 @@ author: "GroundbreakingMC"
 website: "https://github.com/groundbreakingmc"
 
 depend: [ "packetevents" ]
-softdepend: [ "PlaceholderAPI", "Vault" ]
+softdepend: [ "PlaceholderAPI", "Vault", "LuckPerms" ]
 libraries: [ "org.spongepowered:configurate-yaml:4.2.0" ]
 
 commands:
