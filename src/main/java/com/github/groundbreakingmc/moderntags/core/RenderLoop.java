@@ -485,7 +485,6 @@ public final class RenderLoop {
         }
 
         final Object channel = this.protocolManager.getChannel(packet.viewer().getUniqueId());
-        if (channel == null) return;
 
         this.resendForModernPlayers(packet, viewerId, channel, mode, this.reuseModernNames);
 
@@ -493,8 +492,7 @@ public final class RenderLoop {
             if (mode == TeamMode.REMOVE || mode == TeamMode.REMOVE_ENTITIES) {
                 state.teamColor = null;
             } else if (packet.info() != null) {
-                final Object rawColor = packet.info().getColor();
-                state.teamColor = rawColor instanceof NamedTextColor color ? color : null;
+                state.teamColor = packet.info().getColor();
             }
 
             ((LegacyRenderer) state.renderer).updateViewer(state);
@@ -716,7 +714,6 @@ public final class RenderLoop {
         if (view == null || view.hiddenTeamName == null) return;
         final Object channel = state != null ? state.channel
                 : this.protocolManager.getChannel(viewer.getUniqueId());
-        if (channel == null) return;
         final String name = view.hiddenTeamName;
         this.sendClientTeam(viewer.getEntityId(), channel, name,
                 TeamMode.REMOVE_ENTITIES, null, List.of(target.getName()));
@@ -754,7 +751,6 @@ public final class RenderLoop {
 
         final Object channel = state != null ? state.channel
                 : this.protocolManager.getChannel(update.viewer().getUniqueId());
-        if (channel == null) return;
 
         int[] passengers = update.incomingPassengers();
         if (this.hideTagWhenHasPassenger) {
@@ -851,10 +847,8 @@ public final class RenderLoop {
                 final ClientTeamView view = this.clientTeams.get(viewerId);
                 if (view == null || view.hiddenTeamName == null) continue;
                 final Object channel = this.protocolManager.getChannel(viewer.getUniqueId());
-                if (channel != null) {
-                    this.sendClientTeam(viewerId, channel, view.hiddenTeamName,
-                            TeamMode.REMOVE, null, List.of());
-                }
+                this.sendClientTeam(viewerId, channel, view.hiddenTeamName,
+                        TeamMode.REMOVE, null, List.of());
             }
             this.clientTeams.clear();
             this.teamRegistry.clear();
