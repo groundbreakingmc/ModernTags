@@ -145,12 +145,15 @@ public final class ConfigValues {
 
     private void loadNameTags(Config root) {
         final Map<String, Config> configCache = new HashMap<>();
+        final Map<String, ModernRenderer> modernCache = new HashMap<>();
+        final Map<String, LegacyRenderer> legacyCache = new HashMap<>();
         final var groupSections = root.findSectionList("tags");
 
         final var groupsBuilder = ImmutableList.<TagGroup>builder();
         for (int i = 0; i < groupSections.size(); i++) {
             try {
-                groupsBuilder.add(this.parseGroup(configCache, groupSections.get(i), i));
+                groupsBuilder.add(this.parseGroup(
+                        configCache, modernCache, legacyCache, groupSections.get(i), i));
             } catch (Exception ex) {
                 throw new RuntimeException(
                         "[ModernTags] Failed to parse tag group #" + i + " in config.yml (tags[" + i + "])", ex);
@@ -162,7 +165,11 @@ public final class ConfigValues {
                 .collect(ImmutableList.toImmutableList());
     }
 
-    private TagGroup parseGroup(Map<String, Config> configCache, Config section, int groupIdx) {
+    private TagGroup parseGroup(Map<String, Config> configCache,
+                                Map<String, ModernRenderer> modernCache,
+                                Map<String, LegacyRenderer> legacyCache,
+                                Config section,
+                                int groupIdx) {
         final int priority = section.findInt("priority");
         final String context = "tags[" + groupIdx + "] (priority=" + priority + ")";
 
@@ -175,7 +182,8 @@ public final class ConfigValues {
         final var entriesBuilder = ImmutableList.<TagEntry>builder();
         for (int i = 0; i < entrySections.size(); i++) {
             try {
-                entriesBuilder.add(this.parseEntry(configCache, entrySections.get(i), context, i));
+                entriesBuilder.add(this.parseEntry(
+                        configCache, modernCache, legacyCache, entrySections.get(i), context, i));
             } catch (Exception ex) {
                 throw new RuntimeException(
                         "[ModernTags] Failed to parse entry #" + i + " in " + context, ex);
@@ -190,6 +198,8 @@ public final class ConfigValues {
     }
 
     private TagEntry parseEntry(Map<String, Config> configCache,
+                                Map<String, ModernRenderer> modernCache,
+                                Map<String, LegacyRenderer> legacyCache,
                                 Config section,
                                 String groupContext,
                                 int entryIdx) {
@@ -201,11 +211,14 @@ public final class ConfigValues {
                 context + ".viewer-conditions"
         );
 
-        final var modernNode = this.loadNode(configCache, section.findStr("modern"), context);
-        final var legacyNode = this.loadNode(configCache, section.findStr("legacy"), context);
+        final String modernPath = section.findStr("modern");
+        final String legacyPath = section.findStr("legacy");
 
-        final var modern = this.buildModernRenderer(modernNode, context);
-        final var legacy = this.buildLegacyRenderer(legacyNode, context);
+        final var modern = modernCache.computeIfAbsent(modernPath,
+                path -> this.buildModernRenderer(this.loadNode(configCache, path, context), context));
+
+        final var legacy = legacyCache.computeIfAbsent(legacyPath,
+                path -> this.buildLegacyRenderer(this.loadNode(configCache, path, context), context));
 
         return new TagEntry(priority, condition, modern, legacy);
     }
