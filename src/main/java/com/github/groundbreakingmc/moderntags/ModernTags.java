@@ -2,92 +2,45 @@ package com.github.groundbreakingmc.moderntags;
 
 import com.github.groundbreakingmc.moderntags.command.ModernTagsCommand;
 import com.github.groundbreakingmc.moderntags.config.ConfigValues;
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
-import com.github.groundbreakingmc.moderntags.core.RenderTask;
-import com.github.groundbreakingmc.moderntags.listener.BukkitListener;
-import com.github.groundbreakingmc.moderntags.listener.LuckPermsListener;
 import com.github.groundbreakingmc.moderntags.listener.PacketListener;
-import com.github.groundbreakingmc.moderntags.renderer.LegacyRenderer;
-import com.github.groundbreakingmc.moderntags.renderer.ModernRenderer;
+import com.github.groundbreakingmc.moderntags.render.TagManager;
 import com.github.groundbreakingmc.moderntags.text.TagTextResolver;
-import com.github.groundbreakingmc.moderntags.update.UpdateManager;
-import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
 import com.github.groundbreakingmc.mylib.updateschecker.UpdatesChecker;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerCommon;
-import net.luckperms.api.LuckPerms;
 import net.milkbowl.vault.chat.Chat;
 import org.bstats.bukkit.Metrics;
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
-import java.util.concurrent.CompletableFuture;
 
 public final class ModernTags extends JavaPlugin {
 
     private TagTextResolver tagTextResolver;
-    private ConfigValues configValues;
-    private RenderLoop renderLoop;
-    private UpdateManager updateManager;
+    private volatile ConfigValues configValues;
     private PacketListenerCommon packetListener;
-    private LuckPermsListener luckPermsListener;
     private Metrics metrics;
+    private TagManager tags;
 
     @Override
     public void onEnable() {
         this.saveDefaultConfig();
 
         this.tagTextResolver = this.createTagTextResolver();
-        this.renderLoop = new RenderLoop(this.getLogger());
+        final var chatRegistration = getServer().getPluginManager().isPluginEnabled("Vault")
+                ? getServer().getServicesManager().getRegistration(Chat.class) : null;
+        if (chatRegistration != null) this.tagTextResolver.chat(chatRegistration.getProvider());
 
-        this.configValues = new ConfigValues(this.getDataFolder(), this.tagTextResolver);
-        this.configValues.registerModernFactory(cfg -> ModernRenderer.of(this, cfg));
-        this.configValues.registerLegacyFactory(cfg -> LegacyRenderer.of(
-                this.tagTextResolver,
-                this.configValues.belowNameValueParser(),
-                this.configValues.belowNameChar(),
-                cfg
-        ));
+        this.reload();
 
-        this.loadConfiguration();
-
-        this.updateManager = new UpdateManager(this, this.renderLoop);
-        this.updateManager.start(this.configValues.tickRate());
-
-        super.getServer().getPluginManager().registerEvents(new BukkitListener(this.renderLoop), this);
-        Bukkit.getOnlinePlayers().forEach(PlayerLookup::register);
-
-        this.packetListener = PacketEvents.getAPI().getEventManager().registerListener(
-                new PacketListener(this, this.renderLoop)
-        );
-
-        if (super.getServer().getPluginManager().getPlugin("LuckPerms") != null) {
-            final var lp =
-                    super.getServer().getServicesManager().getRegistration(LuckPerms.class);
-            if (lp != null) {
-                this.luckPermsListener = new LuckPermsListener(this, this.renderLoop, lp.getProvider());
-                this.luckPermsListener.register();
-            }
-        }
+        this.tags = new TagManager(this);
+        this.packetListener = PacketEvents.getAPI().getEventManager().registerListener(new PacketListener(this, this.tags));
+        this.tags.start();
 
         final var updatesChecker = new UpdatesChecker(this,
                 "https://raw.githubusercontent.com/groundbreakingmc/ModernTags/main/update.txt",
                 !this.configValues.autoDownloadUpdates() ? "/moderntags update" : "");
         this.getCommand("moderntags").setExecutor(new ModernTagsCommand(this, updatesChecker));
-
-        // Initialize all (target, viewer) pairs — RenderLoop drain handles threading.
-        Bukkit.getAsyncScheduler().runNow(this, task ->
-                this.renderLoop.post(new RenderTask.InitializeAll()));
-
-        // Resolve Vault async — services may not be registered yet at this point.
-        if (super.getServer().getPluginManager().isPluginEnabled("Vault")) {
-            Bukkit.getAsyncScheduler().runNow(this, task -> {
-                final var chatRegistration =
-                        super.getServer().getServicesManager().getRegistration(Chat.class);
-                if (chatRegistration != null) this.tagTextResolver.chat(chatRegistration.getProvider());
-            });
-        }
 
         this.metrics = new Metrics(this, 34701);
         if (this.configValues.checkForUpdates()) {
@@ -98,22 +51,10 @@ public final class ModernTags extends JavaPlugin {
     @Override
     public void onDisable() {
         if (this.metrics != null) this.metrics.shutdown();
-
-        if (this.updateManager != null) this.updateManager.stop();
-
-        if (this.renderLoop != null) {
-            this.renderLoop.post(new RenderTask.InvalidateAll(true));
-        }
-
         if (this.packetListener != null) {
             PacketEvents.getAPI().getEventManager().unregisterListener(this.packetListener);
         }
-
-        PlayerLookup.clear();
-
-        if (this.luckPermsListener != null) {
-            this.luckPermsListener.unregister();
-        }
+        if (this.tags != null) this.tags.close();
     }
 
     @Override
@@ -127,21 +68,9 @@ public final class ModernTags extends JavaPlugin {
         }
     }
 
-    /**
-     * Tears down all rendering state, reloads configuration, and re-initializes.
-     */
-    public CompletableFuture<Void> reload() {
-        return CompletableFuture.runAsync(() -> {
-            this.renderLoop.post(new RenderTask.InvalidateAll(false));
-            this.updateManager.stop();
-
-            this.loadConfiguration();
-
-            Bukkit.getAsyncScheduler().runNow(this, $$ -> {
-                this.renderLoop.post(new RenderTask.InitializeAll());
-                this.updateManager.start(this.configValues.tickRate());
-            });
-        });
+    /** Reloads synchronously on the server thread; a load error preserves the previous configuration. */
+    public void reload() {
+        this.configValues = ConfigValues.of(this.getDataFolder(), this.tagTextResolver);
     }
 
     public TagTextResolver tagTextResolver() {
@@ -150,18 +79,6 @@ public final class ModernTags extends JavaPlugin {
 
     public ConfigValues configValues() {
         return this.configValues;
-    }
-
-    public RenderLoop renderLoop() {
-        return this.renderLoop;
-    }
-
-    private void loadConfiguration() {
-        this.configValues.setup();
-        this.tagTextResolver.miniMessageVault(this.configValues.useMinimessageColorizer());
-        this.renderLoop.groups(this.configValues.tags());
-        this.renderLoop.conditionsRecheckRate(this.configValues.conditionsRecheckRate());
-        this.renderLoop.hideTagWhenHasPassenger(this.configValues.hideTagWhenHasPassenger());
     }
 
     private TagTextResolver createTagTextResolver() {

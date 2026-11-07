@@ -20,12 +20,12 @@ public final class ConditionParser {
             "hasPermission", arguments -> {
                 final var permission = (String) arguments.get(0).value(null);
                 Objects.requireNonNull(permission, "permission can't be null!");
-                return context -> context.player().hasPermission(permission);
+                return player -> player.hasPermission(permission);
             }
     );
     private static final Map<String, ValueProvider<?>> VARIABLES = Map.of(
-            "protocol_version", context -> PacketEvents.getAPI().getPlayerManager()
-                    .getClientVersion(context.player()).getProtocolVersion()
+            "protocol_version", player -> PacketEvents.getAPI().getPlayerManager()
+                    .getClientVersion(player).getProtocolVersion()
     );
 
     private final String rawCondition;
@@ -153,13 +153,13 @@ public final class ConditionParser {
                     .toLowerCase(Locale.ROOT);
             final var params = sepIdx != -1 ? key.substring(sepIdx + 1) : "";
 
-            return context -> {
+            return player -> {
                 // Resolve on evaluation so expansion registration changes remain visible.
                 final var expansion = PlaceholderAPIPlugin.getInstance()
                         .getLocalExpansionManager()
                         .getExpansion(identifier);
                 return expansion != null
-                        ? expansion.onRequest(context.player(), params)
+                        ? expansion.onRequest(player, params)
                         : "no expansion found for placeholder: %" + key + "%";
             };
         }

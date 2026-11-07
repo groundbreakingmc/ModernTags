@@ -1,62 +1,74 @@
 package com.github.groundbreakingmc.moderntags.listener.handler.clientbound;
 
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
-import com.github.groundbreakingmc.moderntags.core.RenderTask;
-import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
-import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
+import com.github.groundbreakingmc.moderntags.render.TagManager;
+import com.github.groundbreakingmc.moderntags.config.ConfigValues;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers;
-import org.bukkit.entity.Player;
+import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-/**
- * Intercepts SET_PASSENGERS for player entities and delegates merging to {@link RenderLoop}.
- * Matching packets are cancelled so RenderLoop can re-send them with renderer-owned passenger IDs included.
- */
-public final class SetPassengersHandler implements ClientBoundPacketHandler {
+public final class SetPassengersHandler {
 
-    private final RenderLoop renderLoop;
+    private final TagManager tags;
 
-    public SetPassengersHandler(@NotNull RenderLoop renderLoop) {
-        this.renderLoop = renderLoop;
+    /**
+     * Connects passenger packets to the recipient's tracking state.
+     */
+    public SetPassengersHandler(@NotNull TagManager tags) {
+        this.tags = tags;
     }
 
-    @Override
-    public void handle(@NotNull PacketSendEvent event) {
-        final var previous = event.getLastUsedWrapper();
-        final Player target;
-        final int[] passengers;
-
-        if (previous instanceof WrapperPlayServerSetPassengers packet) {
-            // Preserve passenger edits made by preceding packet listeners.
-            target = PlayerLookup.playerById(packet.getEntityId());
-            if (target == null) return;
-            passengers = packet.getPassengers();
-        } else {
-            final Object buffer = event.getByteBuf();
-            final int index = ByteBufHelper.readerIndex(buffer);
-            try {
-                // Decode only player vehicles; no wrapper or passenger array for other entities.
-                target = PlayerLookup.playerById(ByteBufHelper.readVarInt(buffer));
-                if (target == null) return;
-
-                final int count = ByteBufHelper.readVarInt(buffer);
-                if (count < 0) return;
-                passengers = new int[count];
-                for (int i = 0; i < count; i++) {
-                    passengers[i] = ByteBufHelper.readVarInt(buffer);
-                }
-            } finally {
-                // Keep the packet readable by PacketEvents and subsequent listeners.
-                ByteBufHelper.readerIndex(buffer, index);
-            }
+    /**
+     * Records foreign passengers and preserves an attached tag in the outgoing packet.
+     */
+    public void handle(@NotNull PacketSendEvent event, @NotNull ConfigValues config) {
+        final var viewer = (Channel) event.getChannel();
+        final var previousWrapper = event.getLastUsedWrapper();
+        if (previousWrapper instanceof WrapperPlayServerSetPassengers packet) {
+            this.update(event, viewer, packet.getEntityId(), packet.getPassengers(), packet, config);
+            return;
         }
+        this.handleNative(event, viewer, config);
+    }
 
-        // Merge before sending so tag entities do not replace the server's passengers.
-        event.setCancelled(true);
+    private void handleNative(PacketSendEvent event, Channel viewer, ConfigValues config) {
+        final var buffer = event.getByteBuf();
+        final int readerIndex = ByteBufHelper.readerIndex(buffer);
+        final int entityId;
+        final int[] passengers;
+        try {
+            entityId = ByteBufHelper.readVarInt(buffer);
+            if (!this.tags.isTracked(viewer, entityId)) return;
+            final int count = ByteBufHelper.readVarInt(buffer);
+            if (count < 0 || count > ByteBufHelper.readableBytes(buffer)) {
+                throw new IllegalStateException("Invalid passenger count: " + count);
+            }
+            passengers = new int[count];
+            for (int i = 0; i < count; i++) {
+                passengers[i] = ByteBufHelper.readVarInt(buffer);
+            }
+        } finally {
+            ByteBufHelper.readerIndex(buffer, readerIndex);
+        }
+        this.update(event, viewer, entityId, passengers, null, config);
+    }
 
-        this.renderLoop.post(new RenderTask.PassengersUpdate(
-                target, event.getPlayer(), passengers));
+    private void update(PacketSendEvent event, Channel viewer, int entityId, int[] passengers,
+                        @Nullable WrapperPlayServerSetPassengers packet, ConfigValues config) {
+        final int[] updated = this.tags.updatePassengers(viewer, entityId, passengers, config);
+        if (updated == passengers) return;
+        if (packet == null) {
+            packet = new WrapperPlayServerSetPassengers(entityId, updated);
+            // Field-based wrappers have no buffer; PacketEvents re-encodes through this one.
+            packet.setBuffer(event.getByteBuf());
+            packet.setServerVersion(event.getServerVersion());
+            packet.setClientVersion(event.getUser().getClientVersion());
+        } else {
+            packet.setPassengers(updated);
+        }
+        event.setLastUsedWrapper(packet);
+        event.markForReEncode(true);
     }
 }

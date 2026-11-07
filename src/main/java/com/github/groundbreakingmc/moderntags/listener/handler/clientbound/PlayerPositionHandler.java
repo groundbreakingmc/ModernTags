@@ -1,27 +1,27 @@
 package com.github.groundbreakingmc.moderntags.listener.handler.clientbound;
 
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
-import com.github.groundbreakingmc.moderntags.core.RenderTask;
-import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
+import com.github.groundbreakingmc.moderntags.render.TagManager;
+import com.github.groundbreakingmc.moderntags.config.ConfigValues;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
-import org.bukkit.entity.Player;
+import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * Re-renders a player's own tag on PLAYER_POSITION_AND_LOOK.
- * Handles self-spawns that {@link SpawnEntityHandler} intentionally skips.
- */
-public final class PlayerPositionHandler implements ClientBoundPacketHandler {
+public final class PlayerPositionHandler {
 
-    private final RenderLoop renderLoop;
+    private final TagManager tags;
 
-    public PlayerPositionHandler(RenderLoop renderLoop) {
-        this.renderLoop = renderLoop;
+    /**
+     * Connects native positioning to the recipient's own tag state.
+     */
+    public PlayerPositionHandler(@NotNull TagManager tags) {
+        this.tags = tags;
     }
 
-    @Override
-    public void handle(@NotNull PacketSendEvent event) {
-        final Player player = event.getPlayer();
-        this.renderLoop.post(new RenderTask.Render(player, player));
+    /**
+     * Restores own tracking without decoding coordinates or changing the packet.
+     */
+    public void handle(@NotNull PacketSendEvent event, @NotNull ConfigValues config) {
+        final var user = event.getUser();
+        this.tags.positionSelf((Channel) event.getChannel(), user.getEntityId(), user.getUUID(), config);
     }
 }

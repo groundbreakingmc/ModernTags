@@ -35,8 +35,15 @@ tick-rate: 50
 # ──
 # Повторно проверять условия владельца и наблюдателя каждые N тиков плагина.
 # -1 — отключить периодическую проверку; проверять при спавне, телепортации
-#      и других событиях, вызывающих пересоздание тега.
+#      и других событиях, вызывающих проверку тега.
 conditions-recheck-rate: 20
+
+# true: one animation clock per owner and identical renderer definition.
+# false: share the clock across owners, only for identical renderer definitions.
+# ──
+# true: отдельная шкала для каждого владельца и одинакового рендерера.
+# false: общая шкала между владельцами, только для одинаковых рендереров.
+sync-animation-on-each-target: true
 
 # Settings for the legacy below-name objective (shown to all clients).
 # ──

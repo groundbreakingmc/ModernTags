@@ -1,11 +1,7 @@
-
 package com.github.groundbreakingmc.moderntags.listener.handler.clientbound;
 
-import com.github.groundbreakingmc.moderntags.ModernTags;
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
-import com.github.groundbreakingmc.moderntags.core.RenderTask;
-import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
-import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
+import com.github.groundbreakingmc.moderntags.render.TagManager;
+import com.github.groundbreakingmc.moderntags.config.ConfigValues;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
@@ -13,83 +9,60 @@ import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnPlayer;
-import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import io.netty.channel.Channel;
 
 import java.util.UUID;
 
-public final class SpawnEntityHandler implements ClientBoundPacketHandler {
+public final class SpawnEntityHandler {
 
-    private static final int PLAYER_ENTITY_TYPE_ID = EntityTypes.PLAYER.getId(
-            PacketEvents.getAPI().getServerManager().getVersion().toClientVersion());
+    private final TagManager tags;
+    private final int playerType;
 
-    private final ModernTags plugin;
-    private final RenderLoop renderLoop;
-
-    public SpawnEntityHandler(@NotNull ModernTags plugin, @NotNull RenderLoop renderLoop) {
-        this.plugin = plugin;
-        this.renderLoop = renderLoop;
+    /**
+     * Connects spawn handling to the manager and resolves the server's player entity type.
+     */
+    public SpawnEntityHandler(@NotNull TagManager tags) {
+        this.tags = tags;
+        this.playerType = EntityTypes.PLAYER.getId(PacketEvents.getAPI().getServerManager().getVersion().toClientVersion());
     }
 
-    @Override
-    public void handle(@NotNull PacketSendEvent event) {
-        final Player viewer = event.getPlayer();
+    /**
+     * Reads player spawns without decoding the remaining entity data or changing the packet.
+     */
+    public void handle(@NotNull PacketSendEvent event, @NotNull ConfigValues config) {
         final var wrapper = event.getLastUsedWrapper();
-        final var packetType = event.getPacketType();
-
-        final Player target;
-
-        if (packetType == PacketType.Play.Server.SPAWN_ENTITY
-                && wrapper instanceof WrapperPlayServerSpawnEntity packet) {
-            if (packet.getEntityType() != EntityTypes.PLAYER) return;
-            target = findTarget(packet.getEntityId(), packet.getUUID().orElse(null), viewer);
-
-        } else if (packetType == PacketType.Play.Server.SPAWN_PLAYER
-                && wrapper instanceof WrapperPlayServerSpawnPlayer packet) {
-            target = findTarget(packet.getEntityId(), packet.getUUID(), viewer);
-
+        if (wrapper instanceof WrapperPlayServerSpawnEntity packet) {
+            this.handleDecoded(event, packet, config);
+        } else if (wrapper instanceof WrapperPlayServerSpawnPlayer packet) {
+            this.tags.track((Channel) event.getChannel(), packet.getEntityId(), packet.getUUID(), config);
         } else {
-            target = readTarget(event, viewer);
+            this.handleNative(event, config);
         }
-
-        if (target == null) return;
-        this.renderLoop.post(new RenderTask.ScheduleRender(target, viewer, this.plugin));
     }
 
-    private static @Nullable Player readTarget(PacketSendEvent event, Player viewer) {
-        final Object buffer = event.getByteBuf();
-        final int index = ByteBufHelper.readerIndex(buffer);
+    private void handleDecoded(PacketSendEvent event, WrapperPlayServerSpawnEntity packet, ConfigValues config) {
+        if (packet.getEntityType() != EntityTypes.PLAYER) return;
+        final var uniqueId = packet.getUUID().orElse(null);
+        if (uniqueId == null) return;
+        this.tags.track((Channel) event.getChannel(), packet.getEntityId(), uniqueId, config);
+    }
 
+    private void handleNative(PacketSendEvent event, ConfigValues config) {
+        final var buffer = event.getByteBuf();
+        final int readerIndex = ByteBufHelper.readerIndex(buffer);
+        final int entityId;
+        final UUID uniqueId;
         try {
-            final int entityId = ByteBufHelper.readVarInt(buffer);
-            if (entityId == viewer.getEntityId()) return null;
-
-            final Player target = PlayerLookup.playerById(entityId);
-            if (target == null) return null;
-
-            final UUID uuid = target.getUniqueId();
-
-            if (ByteBufHelper.readLong(buffer) != uuid.getMostSignificantBits()
-                    || ByteBufHelper.readLong(buffer) != uuid.getLeastSignificantBits()) {
-                return null;
-            }
-
+            entityId = ByteBufHelper.readVarInt(buffer);
+            final long most = ByteBufHelper.readLong(buffer);
+            final long least = ByteBufHelper.readLong(buffer);
             if (event.getPacketType() == PacketType.Play.Server.SPAWN_ENTITY
-                    && ByteBufHelper.readVarInt(buffer) != PLAYER_ENTITY_TYPE_ID) {
-                return null;
-            }
-
-            return target;
+                    && ByteBufHelper.readVarInt(buffer) != this.playerType) return;
+            uniqueId = new UUID(most, least);
         } finally {
-            ByteBufHelper.readerIndex(buffer, index);
+            ByteBufHelper.readerIndex(buffer, readerIndex);
         }
-    }
-
-    private static @Nullable Player findTarget(int entityId, @Nullable UUID uuid, Player viewer) {
-        if (entityId == viewer.getEntityId()) return null;
-
-        final Player target = PlayerLookup.playerById(entityId);
-        return target != null && target.getUniqueId().equals(uuid) ? target : null;
+        this.tags.track((Channel) event.getChannel(), entityId, uniqueId, config);
     }
 }

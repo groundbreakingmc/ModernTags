@@ -20,6 +20,9 @@ dependencies {
     // Source: https://github.com/retrooper/packetevents
     compileOnly(libs.packetevents.spigot)
 
+    // Netty is provided by the server; use its channel/event-loop API directly.
+    compileOnly(libs.netty.transport)
+
     // Source: https://github.com/groundbreakingmc/MyLib
     implementation(libs.mylib)
 

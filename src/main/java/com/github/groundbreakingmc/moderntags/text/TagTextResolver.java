@@ -1,7 +1,7 @@
 package com.github.groundbreakingmc.moderntags.text;
 
 import com.github.groundbreakingmc.gikymessage.Text;
-import com.github.groundbreakingmc.moderntags.core.ViewerState;
+import com.github.groundbreakingmc.gikymessage.ValueResolver;
 import com.github.groundbreakingmc.moderntags.util.NumberUtils;
 import me.clip.placeholderapi.PlaceholderAPIPlugin;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
@@ -19,28 +19,16 @@ import java.util.function.BiFunction;
 import java.util.function.ToIntBiFunction;
 import java.util.logging.Logger;
 
-/**
- * Resolves player-specific placeholders at render time.
- * <p>
- * Supports two-context syntax: <code>{owner:key}</code> resolves against the tag's target player,
- * <code>{viewer:key}</code> resolves against the observing player. Relational placeholders use
- * {@code rel:identifier_params} with the viewer first and the owner second.
- * <p>
- * Built-in keys: {@code name}, {@code display_name}, {@code health}, {@code prefix}, {@code suffix}.
- * Other owner/viewer keys are forwarded to PlaceholderAPI, where the identifier is the part before
- * the first underscore and the remainder is passed as params. Unprefixed keys remain literal.
- * <p>
- * Templates are compiled once via {@link #compile(String)} at config load. Handlers are selected
- * then; player values, Vault services and PAPI expansions are read at render time.
- */
+/** Compiles owner, viewer and relational placeholders for GikyMessage. */
 public final class TagTextResolver {
+
+    private static final ToIntBiFunction<Player, Player> ZERO = (owner, viewer) -> 0;
 
     private final Logger logger;
     private final boolean supportsVault;
     private final boolean supportsPapi;
 
-    private @Nullable Chat chat;
-    private boolean miniMessageVault;
+    private volatile @Nullable Chat chat;
 
     public TagTextResolver(Logger logger, boolean supportsVault, boolean supportsPapi) {
         this.logger = logger;
@@ -48,152 +36,209 @@ public final class TagTextResolver {
         this.supportsPapi = supportsPapi;
     }
 
-    /**
-     * Compiles a template with handlers bound to its unique placeholder keys.
-     * Keeps GikyMessage's last-result cache per template and physical thread.
-     */
-    public @NotNull Text<ViewerState> compile(@NotNull String pattern) {
-        return Text.cacheableOf(pattern, key -> {
-            final var provider = this.bind(key);
-            return (state, value) -> value.component(provider.apply(state.target, state.viewer));
+    /** Binds each key and its Vault formatting mode to the configuration that compiled the template. */
+    public @NotNull Template compile(@NotNull String pattern, boolean miniMessageVault) {
+        final boolean[] viewerDependent = {false};
+        final var compiled = Text.cacheableOf(pattern, key -> {
+            if (dependsOnViewer(key)) {
+                viewerDependent[0] = true;
+            }
+            return this.bindText(key, miniMessageVault);
         });
+        return new Template(compiled, viewerDependent[0]);
+    }
+
+    public @NotNull Component resolve(@NotNull Context players, @NotNull Template template) {
+        return template.compiled().render(players);
     }
 
     /**
-     * Renders with the existing pair state as context; the compiled text does not retain it.
+     * Compiles a numeric expression once. Built-in health and plain PAPI results
+     * do not need an intermediate Component or a plain-text serialization.
+     * The result retains its viewer dependency and captures Vault formatting from
+     * the compiling configuration.
      */
-    public Component resolve(@NotNull ViewerState state, @NotNull Text<ViewerState> compiled) {
-        return compiled.render(state);
-    }
+    public @NotNull NumericTemplate compileNumeric(@NotNull String pattern, boolean miniMessageVault) {
+        final ToIntBiFunction<Player, Player> compiled = switch (pattern) {
+            case "" -> ZERO;
+            case "owner:health" -> (owner, viewer) -> NumberUtils.healthToInt(owner.getHealth());
+            case "viewer:health" -> (owner, viewer) -> NumberUtils.healthToInt(viewer.getHealth());
 
-    /**
-     * Returns a lazy function that resolves {@code pattern} against the chosen player at call time
-     * and parses the result as an integer.
-     * <p>
-     * Pattern format: {@code owner:key}, {@code viewer:key}, or {@code rel:identifier_params}.
-     *
-     * @param pattern placeholder pattern string from config (e.g. {@code "owner:health"})
-     * @return {@code ToIntBiFunction<target, viewer>}
-     */
-    public @NotNull ToIntBiFunction<Player, Player> intFromPlaceholder(@NotNull String pattern) {
-        if (pattern.isEmpty()) return (target, viewer) -> 0;
+            case "owner:name" -> (owner, viewer) -> parseInt(owner.getName());
+            case "viewer:name" -> (owner, viewer) -> parseInt(viewer.getName());
 
-        final var provider = this.bind(pattern);
-        return (target, viewer) -> {
-            final var component = provider.apply(target, viewer);
-            if (component == null) return 0;
-            final String raw = PlainTextComponentSerializer.plainText().serialize(component).trim();
-            try {
-                return (int) Double.parseDouble(raw);
-            } catch (NumberFormatException ignored) {
-                return 0;
-            }
+            case "owner:display_name" -> (owner, viewer) -> componentToInt(owner.displayName());
+            case "viewer:display_name" -> (owner, viewer) -> componentToInt(viewer.displayName());
+
+            case "owner:prefix" -> (owner, viewer) -> componentToInt(this.vaultComponent(owner, true, miniMessageVault));
+            case "owner:suffix" -> (owner, viewer) -> componentToInt(this.vaultComponent(owner, false, miniMessageVault));
+            case "viewer:prefix" -> (owner, viewer) -> componentToInt(this.vaultComponent(viewer, true, miniMessageVault));
+            case "viewer:suffix" -> (owner, viewer) -> componentToInt(this.vaultComponent(viewer, false, miniMessageVault));
+
+            default -> this.bindNumericPapi(pattern);
         };
+        return new NumericTemplate(compiled, dependsOnViewer(pattern));
     }
 
-    private @NotNull BiFunction<Player, Player, Component> bind(@NotNull String key) {
+    private static boolean dependsOnViewer(String key) {
+        return key.startsWith("viewer:") || key.startsWith("rel:");
+    }
+
+    private @NotNull ValueResolver<Context> bindText(@NotNull String key, boolean miniMessageVault) {
         return switch (key) {
-            case "owner:name" -> (owner, viewer) -> owner.name();
-            case "owner:display_name" -> (owner, viewer) -> owner.displayName();
-            case "owner:health" -> (owner, viewer) -> Component.text(NumberUtils.healthToStr(owner.getHealth()));
-            case "owner:prefix" -> (owner, viewer) -> this.vaultComponent(owner, true);
-            case "owner:suffix" -> (owner, viewer) -> this.vaultComponent(owner, false);
+            case "owner:name" -> (pair, value) -> value.component(pair.owner().name());
+            case "viewer:name" -> (pair, value) -> value.component(pair.viewer().name());
 
-            case "viewer:name" -> (owner, viewer) -> viewer.name();
-            case "viewer:display_name" -> (owner, viewer) -> viewer.displayName();
-            case "viewer:health" -> (owner, viewer) -> Component.text(NumberUtils.healthToStr(viewer.getHealth()));
-            case "viewer:prefix" -> (owner, viewer) -> this.vaultComponent(viewer, true);
-            case "viewer:suffix" -> (owner, viewer) -> this.vaultComponent(viewer, false);
+            case "owner:health" -> (pair, value) -> value.number(NumberUtils.healthToInt(pair.owner().getHealth()));
+            case "viewer:health" -> (pair, value) -> value.number(NumberUtils.healthToInt(pair.viewer().getHealth()));
 
-            default -> {
-                if (key.startsWith("owner:")) {
-                    yield this.bindPapi(key.substring(6), false);
-                }
+            case "owner:display_name" -> (pair, value) -> value.component(pair.owner().displayName());
+            case "viewer:display_name" -> (pair, value) -> value.component(pair.viewer().displayName());
 
-                if (key.startsWith("viewer:")) {
-                    yield this.bindPapi(key.substring(7), true);
-                }
+            case "owner:prefix" -> (pair, value) -> value.component(this.vaultComponent(pair.owner(), true, miniMessageVault));
+            case "owner:suffix" -> (pair, value) -> value.component(this.vaultComponent(pair.owner(), false, miniMessageVault));
+            case "viewer:prefix" -> (pair, value) -> value.component(this.vaultComponent(pair.viewer(), true, miniMessageVault));
+            case "viewer:suffix" -> (pair, value) -> value.component(this.vaultComponent(pair.viewer(), false, miniMessageVault));
 
-                if (key.startsWith("rel:")) {
-                    final String relationalKey = key.substring(4);
-                    final int sepIdx = relationalKey.indexOf('_');
-                    if (sepIdx == -1) yield (owner, viewer) -> null;
-                    final String identifier = relationalKey.substring(0, sepIdx);
-                    final String params = relationalKey.substring(sepIdx + 1);
-                    yield (owner, viewer) -> this.relationalComponent(viewer, owner, identifier, params);
-                }
-
-                final var fallback = Component.text('{' + key + '}');
-                yield (owner, viewer) -> {
-                    this.logger.warning(
-                            "Unknown placeholder '" + key + "'. " +
-                                    "If this is intended to be plain text and not a placeholder, " +
-                                    "escape it using '\\'."
-                    );
-                    return fallback;
-                };
-            }
+            default -> this.bindTextPapi(key);
         };
     }
 
-    private @Nullable Component vaultComponent(@NotNull Player player, boolean prefix) {
-        if (!this.supportsVault || this.chat == null) return null;
+    private @NotNull ValueResolver<Context> bindTextPapi(@NotNull String key) {
+        final var provider = this.bindPapi(key);
+        if (provider != null) {
+            return (pair, value) -> value.text(provider.apply(pair.owner(), pair.viewer()));
+        }
 
-        final String raw = prefix
-                ? this.chat.getPlayerPrefix(player)
-                : this.chat.getPlayerSuffix(player);
-
-        if (raw == null || raw.isEmpty()) return Component.empty();
-
-        return this.miniMessageVault
-                ? MiniMessage.miniMessage().deserialize(raw)
-                : LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+        final Component fallback = this.unknownPlaceholder(key);
+        return (pair, value) -> value.component(fallback);
     }
 
-    private @NotNull BiFunction<Player, Player, Component> bindPapi(@NotNull String key, boolean viewerContext) {
-        final int sepIdx = key.indexOf('_');
-        final String identifier = sepIdx != -1 ? key.substring(0, sepIdx) : key;
-        final String params = sepIdx != -1 ? key.substring(sepIdx + 1) : "";
-        return (owner, viewer) -> this.papiComponent(viewerContext ? viewer : owner, identifier, params);
+    private @NotNull ToIntBiFunction<Player, Player> bindNumericPapi(@NotNull String key) {
+        final var provider = this.bindPapi(key);
+        if (provider != null) {
+            return (owner, viewer) -> parseInt(provider.apply(owner, viewer));
+        }
+
+        this.warnUnknown(key);
+        return ZERO;
     }
 
-    private @Nullable Component papiComponent(@NotNull Player player, @NotNull String identifier,
-                                              @NotNull String params) {
-        final var expansion = this.findExpansion(identifier);
+    /** Splits the key and specializes the callback once, avoiding a scope switch per render. */
+    private @Nullable BiFunction<Player, Player, String> bindPapi(@NotNull String key) {
+        final Scope scope;
+        final int offset;
+        if (key.startsWith("owner:")) {
+            scope = Scope.OWNER;
+            offset = 6;
+        } else if (key.startsWith("viewer:")) {
+            scope = Scope.VIEWER;
+            offset = 7;
+        } else if (key.startsWith("rel:")) {
+            scope = Scope.RELATIONAL;
+            offset = 4;
+        } else {
+            return null;
+        }
 
-        if (expansion == null) return null;
+        final String raw = key.substring(offset);
+        final int separator = raw.indexOf('_');
+        if (scope == Scope.RELATIONAL && separator < 0) {
+            return (owner, viewer) -> null;
+        }
 
-        final String result = expansion.onRequest(player, params);
-        return result != null ? Component.text(result) : null;
-    }
+        final String identifier = separator < 0 ? raw : raw.substring(0, separator);
+        final String params = separator < 0 ? "" : raw.substring(separator + 1);
 
-    private @Nullable Component relationalComponent(
-            @NotNull Player viewer,
-            @NotNull Player owner,
-            @NotNull String identifier,
-            @NotNull String params
-    ) {
-        final var expansion = this.findExpansion(identifier);
-
-        if (!(expansion instanceof Relational relational)) return null;
-
-        final String result = relational.onPlaceholderRequest(
-                viewer, owner, params
-        );
-        return result != null ? Component.text(result) : null;
+        return switch (scope) {
+            case OWNER -> (owner, viewer) -> {
+                final var expansion = this.findExpansion(identifier);
+                return expansion == null ? null : expansion.onRequest(owner, params);
+            };
+            case VIEWER -> (owner, viewer) -> {
+                final var expansion = this.findExpansion(identifier);
+                return expansion == null ? null : expansion.onRequest(viewer, params);
+            };
+            case RELATIONAL -> (owner, viewer) -> {
+                final var expansion = this.findExpansion(identifier);
+                return expansion instanceof Relational relational
+                        ? relational.onPlaceholderRequest(viewer, owner, params) : null;
+            };
+        };
     }
 
     private @Nullable PlaceholderExpansion findExpansion(@NotNull String identifier) {
         if (!this.supportsPapi) return null;
-        // Keep the lookup at render time so changes to registered expansions take effect.
+        // Deliberately dynamic: expansion registration can change after compilation.
         return PlaceholderAPIPlugin.getInstance().getLocalExpansionManager().getExpansion(identifier);
+    }
+
+    private @Nullable Component vaultComponent(@NotNull Player player, boolean prefix, boolean miniMessageVault) {
+        final Chat service = this.chat;
+        if (!this.supportsVault || service == null) return null;
+
+        final String raw = prefix ? service.getPlayerPrefix(player) : service.getPlayerSuffix(player);
+        if (raw == null || raw.isEmpty()) return Component.empty();
+
+        return miniMessageVault
+                ? MiniMessage.miniMessage().deserialize(raw)
+                : LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+    }
+
+    private @NotNull Component unknownPlaceholder(@NotNull String key) {
+        this.warnUnknown(key);
+        return Component.text('{' + key + '}');
+    }
+
+    private void warnUnknown(@NotNull String key) {
+        this.logger.warning("Unknown placeholder '" + key + "'. "
+                + "If this is intended to be plain text and not a placeholder, escape it using '\\'.");
+    }
+
+    private static int componentToInt(@Nullable Component component) {
+        return component == null ? 0 : parseInt(PlainTextComponentSerializer.plainText().serialize(component));
+    }
+
+    private static int parseInt(@Nullable String value) {
+        if (value == null) return 0;
+        try {
+            return (int) Double.parseDouble(value.trim());
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     public void chat(@Nullable Chat chat) {
         this.chat = chat;
     }
 
-    public void miniMessageVault(boolean use) {
-        this.miniMessageVault = use;
+    private enum Scope { OWNER, VIEWER, RELATIONAL }
+
+    /**
+     * Player identities used when evaluating a text template.
+     */
+    public interface Context {
+
+        /**
+         * @return the player whose tag is being evaluated
+         */
+        @NotNull Player owner();
+
+        /**
+         * @return the player observing the tag
+         */
+        @NotNull Player viewer();
+    }
+
+    public record Template(@NotNull Text<Context> compiled, boolean viewerDependent) {
+    }
+
+    /**
+     * An immutable numeric placeholder compiled once for a configuration snapshot.
+     *
+     * @param compiled integer resolver; owner-only results can be shared among viewers
+     * @param viewerDependent whether evaluation needs the actual viewer, including relational placeholders
+     */
+    public record NumericTemplate(@NotNull ToIntBiFunction<Player, Player> compiled, boolean viewerDependent) {
     }
 }

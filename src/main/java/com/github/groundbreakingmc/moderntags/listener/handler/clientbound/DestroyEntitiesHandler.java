@@ -1,37 +1,51 @@
 package com.github.groundbreakingmc.moderntags.listener.handler.clientbound;
 
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
-import com.github.groundbreakingmc.moderntags.core.RenderTask;
-import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
-import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
+import com.github.groundbreakingmc.moderntags.render.TagManager;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
-import org.bukkit.entity.Player;
+import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * Stops rendering a player's tag when DESTROY_ENTITIES names their entity ID.
- */
-public final class DestroyEntitiesHandler implements ClientBoundPacketHandler {
+public final class DestroyEntitiesHandler {
 
-    private final RenderLoop renderLoop;
+    private final TagManager tags;
 
-    public DestroyEntitiesHandler(RenderLoop renderLoop) {
-        this.renderLoop = renderLoop;
+    /**
+     * Connects entity removal packets to the recipient's tracking state.
+     */
+    public DestroyEntitiesHandler(@NotNull TagManager tags) {
+        this.tags = tags;
     }
 
-    @Override
+    /**
+     * Reads removed entity IDs without copying them or changing the outgoing packet.
+     */
     public void handle(@NotNull PacketSendEvent event) {
-        // Reuse earlier entity-ID edits instead of decoding the destruction list again.
-        final var previous = event.getLastUsedWrapper();
-        final var packet = previous instanceof WrapperPlayServerDestroyEntities destroy
-                ? destroy : new WrapperPlayServerDestroyEntities(event);
-        final Player viewer = event.getPlayer();
+        final var viewer = (Channel) event.getChannel();
+        if (event.getLastUsedWrapper() instanceof WrapperPlayServerDestroyEntities packet) {
+            this.handleDecoded(viewer, packet);
+            return;
+        }
+        this.handleNative(viewer, event.getByteBuf());
+    }
+
+    private void handleDecoded(Channel viewer, WrapperPlayServerDestroyEntities packet) {
         for (final int entityId : packet.getEntityIds()) {
-            final var target = PlayerLookup.playerById(entityId);
-            if (target != null) {
-                this.renderLoop.post(new RenderTask.StopTracking(target, viewer));
+            this.tags.untrack(viewer, entityId);
+        }
+    }
+
+    private void handleNative(Channel viewer, Object buffer) {
+        final int readerIndex = ByteBufHelper.readerIndex(buffer);
+        try {
+            final int count = ByteBufHelper.readVarInt(buffer);
+            for (int i = 0; i < count; i++) {
+                final int entityId = ByteBufHelper.readVarInt(buffer);
+                this.tags.untrack(viewer, entityId);
             }
+        } finally {
+            ByteBufHelper.readerIndex(buffer, readerIndex);
         }
     }
 }

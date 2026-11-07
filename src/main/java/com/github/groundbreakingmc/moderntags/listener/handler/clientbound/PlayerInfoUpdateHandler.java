@@ -1,114 +1,85 @@
-
 package com.github.groundbreakingmc.moderntags.listener.handler.clientbound;
 
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
-import com.github.groundbreakingmc.moderntags.core.RenderTask;
-import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
-import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.groundbreakingmc.moderntags.render.TagManager;
+import com.github.groundbreakingmc.moderntags.config.ConfigValues;
 import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
+import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
-import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
 
-/**
- * Refreshes game-mode visibility independently of tab-list profile membership.
- */
-public final class PlayerInfoUpdateHandler implements ClientBoundPacketHandler {
+/** Handles advertised spectator-mode changes independently of profile membership. */
+public final class PlayerInfoUpdateHandler {
 
-    private static final int GAME_MODE_ACTION =
-            1 << WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE.ordinal();
+    private static final int GAME_MODE_ACTION = 1 << WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE.ordinal();
+    // PacketEvents reads ceil(action count / 8) bytes before the entry count.
+    private static final boolean SINGLE_ACTION_BYTE = WrapperPlayServerPlayerInfoUpdate.Action.VALUES.length <= 8;
 
-    // readEnumSet uses more than one byte if the library adds a ninth action.
-    private static final boolean SINGLE_ACTION_BYTE =
-            WrapperPlayServerPlayerInfoUpdate.Action.VALUES.length <= 8;
-
-    private final RenderLoop renderLoop;
+    private final TagManager tags;
 
     /**
-     * Creates a handler that forwards player-info changes to the render loop.
-     *
-     * @param renderLoop the owner of tracked tag state
+     * Connects advertised game modes to the tag manager.
      */
-    public PlayerInfoUpdateHandler(@NotNull RenderLoop renderLoop) {
-        this.renderLoop = renderLoop;
+    public PlayerInfoUpdateHandler(@NotNull TagManager tags) {
+        this.tags = tags;
     }
 
     /**
-     * Refreshes tracked tags for game-mode changes; profile membership does not change tracking.
-     *
-     * @param event the outgoing player-info update
+     * Reads game-mode changes without changing the outgoing packet.
      */
-    @Override
-    public void handle(@NotNull PacketSendEvent event) {
-        final var previous = event.getLastUsedWrapper();
-
-        if (previous instanceof WrapperPlayServerPlayerInfoUpdate packet) {
-            // Preserve earlier changes to the action set or individual entries.
-            this.handleDecoded(packet, event);
+    public void handle(@NotNull PacketSendEvent event, @NotNull ConfigValues config) {
+        final var previousWrapper = event.getLastUsedWrapper();
+        if (previousWrapper instanceof WrapperPlayServerPlayerInfoUpdate packet) {
+            this.handleDecoded(event, packet, config);
             return;
         }
+        if (this.handleNative(event, config)) return;
 
-        if (!handleNative(event, this.renderLoop)) {
-            this.handleDecoded(new WrapperPlayServerPlayerInfoUpdate(event), event);
+        final var buffer = event.getByteBuf();
+        final int readerIndex = ByteBufHelper.readerIndex(buffer);
+        final WrapperPlayServerPlayerInfoUpdate packet;
+        try {
+            packet = new WrapperPlayServerPlayerInfoUpdate(event);
+        } finally {
+            ByteBufHelper.readerIndex(buffer, readerIndex);
+            event.setLastUsedWrapper(previousWrapper);
         }
+        this.handleDecoded(event, packet, config);
     }
 
-    private void handleDecoded(WrapperPlayServerPlayerInfoUpdate packet, PacketSendEvent event) {
+    private void handleDecoded(PacketSendEvent event, WrapperPlayServerPlayerInfoUpdate packet, ConfigValues config) {
         if (!packet.getActions().contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE)) return;
-
-        final Player viewer = event.getPlayer();
-
+        final var viewer = (Channel) event.getChannel();
         for (final var entry : packet.getEntries()) {
-            final var target = Bukkit.getPlayer(entry.getGameProfile().getUUID());
-            if (target == null) continue;
-
-            this.renderLoop.post(new RenderTask.GameModeUpdate(target, viewer));
+            this.tags.updateSpectator(viewer, entry.getProfileId(), entry.getGameMode() == GameMode.SPECTATOR, config);
         }
     }
 
-    /**
-     * Handles packets with no game-mode action or only UPDATE_GAME_MODE without
-     * decoding profiles, chat sessions, or an entry collection.
-     *
-     * @return {@code false} if other actions require the full PacketEvents decoder
-     */
-    private static boolean handleNative(PacketSendEvent event, RenderLoop renderLoop) {
+    /** Returns false when combined actions require PacketEvents' full decoder. */
+    private boolean handleNative(PacketSendEvent event, ConfigValues config) {
         if (!SINGLE_ACTION_BYTE) return false;
-
-        final Object buffer = event.getByteBuf();
-        final int index = ByteBufHelper.readerIndex(buffer);
-
+        final var buffer = event.getByteBuf();
+        final int readerIndex = ByteBufHelper.readerIndex(buffer);
         try {
             final int actions = ByteBufHelper.readByte(buffer) & 0xFF;
+            // Profile membership, display-name and latency updates do not affect tags.
             if ((actions & GAME_MODE_ACTION) == 0) return true;
             if (actions != GAME_MODE_ACTION) return false;
 
             final int count = ByteBufHelper.readVarInt(buffer);
             if (count < 0) return false;
-            if (count == 0) return true;
-
-            final Player viewer = event.getPlayer();
-
+            final var viewer = (Channel) event.getChannel();
             for (int i = 0; i < count; i++) {
-                final long most = ByteBufHelper.readLong(buffer);
-                final long least = ByteBufHelper.readLong(buffer);
-
-                // The actual game-mode value is not needed for visibility refresh.
-                ByteBufHelper.readVarInt(buffer);
-
-                final Player target = Bukkit.getPlayer(new UUID(most, least));
-                if (target != null) {
-                    renderLoop.post(new RenderTask.GameModeUpdate(target, viewer));
-                }
+                final var uniqueId = new UUID(ByteBufHelper.readLong(buffer), ByteBufHelper.readLong(buffer));
+                final boolean spectator = ByteBufHelper.readVarInt(buffer) == GameMode.SPECTATOR.getId();
+                this.tags.updateSpectator(viewer, uniqueId, spectator, config);
             }
-
             return true;
         } finally {
-            // Subsequent listeners must observe the original packet position.
-            ByteBufHelper.readerIndex(buffer, index);
+            ByteBufHelper.readerIndex(buffer, readerIndex);
         }
     }
 }

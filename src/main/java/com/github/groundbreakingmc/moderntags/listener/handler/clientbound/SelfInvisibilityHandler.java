@@ -1,99 +1,60 @@
-
 package com.github.groundbreakingmc.moderntags.listener.handler.clientbound;
 
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
-import com.github.groundbreakingmc.moderntags.core.RenderTask;
-import com.github.groundbreakingmc.moderntags.core.ViewerState;
-import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
+import com.github.groundbreakingmc.moderntags.render.TagManager;
+import com.github.groundbreakingmc.moderntags.config.ConfigValues;
+import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.potion.PotionTypes;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityEffect;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerRemoveEntityEffect;
-import org.bukkit.entity.Player;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * Tracks invisibility effects affecting a player's own tag.
- *
- * <p>Only modern clients (1.19.4+) require explicit suppression.
- * Legacy clients rely on native nametag visibility.
- *
- * <p>Previously decoded packet wrappers are reused to preserve modifications
- * made by earlier listeners. Otherwise, the packet is inspected directly
- * without allocating a wrapper.
- */
-public final class SelfInvisibilityHandler implements ClientBoundPacketHandler {
+/** Records the own Modern tag's invisibility from native potion packets. */
+public final class SelfInvisibilityHandler {
 
-    private static final int INVISIBILITY_EFFECT_ID = PotionTypes.INVISIBILITY.getId(
-            PacketEvents.getAPI().getServerManager().getVersion().toClientVersion());
+    private final TagManager tags;
+    private final int invisibilityEffectId;
 
-    private final RenderLoop renderLoop;
-
-    public SelfInvisibilityHandler(@NotNull RenderLoop renderLoop) {
-        this.renderLoop = renderLoop;
+    /**
+     * Connects own effects to tag state and resolves the server's invisibility effect ID.
+     */
+    public SelfInvisibilityHandler(@NotNull TagManager tags) {
+        this.tags = tags;
+        this.invisibilityEffectId = PotionTypes.INVISIBILITY.getId(
+                PacketEvents.getAPI().getServerManager().getVersion().toClientVersion());
     }
 
     /**
-     * Processes outgoing effect packets and updates the viewer's self-tag
-     * suppression state when their own invisibility changes.
-     *
-     * @param event the outgoing packet event
+     * Records own invisibility changes without decoding unrelated effect fields.
      */
-    @Override
-    public void handle(@NotNull PacketSendEvent event) {
-        // Legacy clients handle invisibility through native nametags.
+    public void handle(@NotNull PacketSendEvent event, @NotNull ConfigValues config) {
         if (event.getUser().getClientVersion().isOlderThan(ClientVersion.V_1_19_4)) return;
-
-        final Player viewer = event.getPlayer();
-        final int entityId = viewer.getEntityId();
+        final int selfEntityId = event.getUser().getEntityId();
         final boolean added = event.getPacketType() == PacketType.Play.Server.ENTITY_EFFECT;
         final var wrapper = event.getLastUsedWrapper();
-
-        // Reuse previously decoded wrappers to preserve modifications made by earlier listeners.
         final boolean matches;
-
         if (added && wrapper instanceof WrapperPlayServerEntityEffect packet) {
-            matches = packet.getEntityId() == entityId
-                    && packet.getPotionType() == PotionTypes.INVISIBILITY;
-
+            matches = packet.getEntityId() == selfEntityId && packet.getPotionType() == PotionTypes.INVISIBILITY;
         } else if (!added && wrapper instanceof WrapperPlayServerRemoveEntityEffect packet) {
-            matches = packet.getEntityId() == entityId
-                    && packet.getPotionType() == PotionTypes.INVISIBILITY;
-
+            matches = packet.getEntityId() == selfEntityId && packet.getPotionType() == PotionTypes.INVISIBILITY;
         } else {
-            // Read directly when no compatible wrapper is available.
-            matches = isSelfInvisibility(event.getByteBuf(), entityId);
+            matches = this.isSelfInvisibility(event.getByteBuf(), selfEntityId);
         }
-
         if (!matches) return;
-
-        this.renderLoop.post(new RenderTask.SuppressChange(
-                viewer, viewer, ViewerState.SUPPRESS_INVISIBLE, added));
+        this.tags.updateMetadata((Channel) event.getChannel(), selfEntityId, added, null, config);
     }
 
-    /**
-     * Checks whether the packet targets the given entity with an invisibility effect.
-     *
-     * <p>Reads directly from the packet buffer without allocating a wrapper.
-     * The original reader index is always restored, including when decoding fails.
-     *
-     * @param buffer   the packet's underlying byte buffer
-     * @param entityId the entity ID to match
-     * @return {@code true} if the packet targets the entity with invisibility
-     */
-    private static boolean isSelfInvisibility(Object buffer, int entityId) {
-        final int index = ByteBufHelper.readerIndex(buffer);
-
+    private boolean isSelfInvisibility(Object buffer, int entityId) {
+        final int readerIndex = ByteBufHelper.readerIndex(buffer);
         try {
             return ByteBufHelper.readVarInt(buffer) == entityId
-                    && ByteBufHelper.readVarInt(buffer) == INVISIBILITY_EFFECT_ID;
+                    && ByteBufHelper.readVarInt(buffer) == this.invisibilityEffectId;
         } finally {
-            // Restore the reader index so subsequent listeners can decode the packet correctly.
-            ByteBufHelper.readerIndex(buffer, index);
+            ByteBufHelper.readerIndex(buffer, readerIndex);
         }
     }
 }

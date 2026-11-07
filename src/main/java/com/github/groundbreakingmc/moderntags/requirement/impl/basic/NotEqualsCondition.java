@@ -1,7 +1,7 @@
 package com.github.groundbreakingmc.moderntags.requirement.impl.basic;
 
 import com.github.groundbreakingmc.moderntags.requirement.Condition;
-import com.github.groundbreakingmc.moderntags.requirement.Context;
+import org.bukkit.entity.Player;
 import com.github.groundbreakingmc.moderntags.util.ValueProvider;
 import org.jetbrains.annotations.NotNull;
 
@@ -21,9 +21,9 @@ public final class NotEqualsCondition implements Condition {
     }
 
     @Override
-    public boolean test(@NotNull Context context) {
-        final var left = this.left.value(context);
-        final var right = this.right.value(context);
+    public boolean test(@NotNull Player player) {
+        final var left = this.left.value(player);
+        final var right = this.right.value(player);
         return left == null || right == null ? left != right : !left.equals(right);
     }
 }

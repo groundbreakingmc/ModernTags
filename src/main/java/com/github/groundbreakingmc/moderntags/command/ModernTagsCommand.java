@@ -32,7 +32,7 @@ public final class ModernTagsCommand implements TabExecutor {
     }
 
     /**
-     * Reloads configuration, or checks for and downloads an update asynchronously.
+     * Reloads configuration synchronously, or checks for and downloads an update asynchronously.
      *
      * @param sender  the command sender
      * @param command the registered command
@@ -59,14 +59,13 @@ public final class ModernTagsCommand implements TabExecutor {
     }
 
     private void reloadConfiguration(@NotNull CommandSender sender) {
-        this.plugin.reload().whenComplete((result, error) -> {
-            if (error != null) {
-                sender.sendMessage("§cFailed to reload configuration. See the console for details.");
-                this.plugin.getLogger().log(Level.SEVERE, "Error reloading configuration", error);
-            } else {
-                sender.sendMessage("§aModernTags configuration reloaded successfully!");
-            }
-        });
+        try {
+            this.plugin.reload();
+            sender.sendMessage("§aModernTags configuration reloaded successfully!");
+        } catch (RuntimeException error) {
+            sender.sendMessage("§cFailed to reload configuration. See the console for details.");
+            this.plugin.getLogger().log(Level.SEVERE, "Error reloading configuration", error);
+        }
     }
 
     private void downloadUpdate(@NotNull CommandSender sender) {

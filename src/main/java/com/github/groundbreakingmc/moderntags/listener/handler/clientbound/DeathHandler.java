@@ -1,42 +1,48 @@
 package com.github.groundbreakingmc.moderntags.listener.handler.clientbound;
 
-import com.github.groundbreakingmc.moderntags.core.RenderLoop;
-import com.github.groundbreakingmc.moderntags.core.RenderTask;
-import com.github.groundbreakingmc.moderntags.listener.handler.ClientBoundPacketHandler;
-import com.github.groundbreakingmc.moderntags.util.PlayerLookup;
+import com.github.groundbreakingmc.moderntags.render.TagManager;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityStatus;
-import org.bukkit.entity.Player;
+import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * Stops rendering a player's tag on death (entity status byte {@code 3}).
- */
-public final class DeathHandler implements ClientBoundPacketHandler {
+public final class DeathHandler {
 
     private static final byte DEATH_STATUS = 3;
 
-    private final RenderLoop renderLoop;
+    private final TagManager tags;
 
-    public DeathHandler(@NotNull RenderLoop renderLoop) {
-        this.renderLoop = renderLoop;
+    /**
+     * Connects death packets to the recipient's tracking state.
+     */
+    public DeathHandler(@NotNull TagManager tags) {
+        this.tags = tags;
     }
 
-    @Override
+    /**
+     * Reads the dying entity's ID without changing the outgoing packet.
+     */
     public void handle(@NotNull PacketSendEvent event) {
-        // Preserve prior status edits and avoid decoding an already available wrapper.
-        final var previous = event.getLastUsedWrapper();
-        final var packet = previous instanceof WrapperPlayServerEntityStatus status
-                ? status : new WrapperPlayServerEntityStatus(event);
-        if (packet.getStatus() != DEATH_STATUS) return;
+        if (event.getLastUsedWrapper() instanceof WrapperPlayServerEntityStatus packet) {
+            if (packet.getStatus() != DEATH_STATUS) return;
+            this.tags.markDead((Channel) event.getChannel(), packet.getEntityId());
+            return;
+        }
+        this.handleNative(event);
+    }
 
-        final Player viewer = event.getPlayer();
-        final int entityId = packet.getEntityId();
-        final Player target = viewer.getEntityId() == entityId
-                ? viewer
-                : PlayerLookup.playerById(entityId);
-        if (target == null) return;
-
-        this.renderLoop.post(new RenderTask.StopRendering(target, viewer));
+    private void handleNative(PacketSendEvent event) {
+        final var buffer = event.getByteBuf();
+        final int readerIndex = ByteBufHelper.readerIndex(buffer);
+        final int entityId;
+        try {
+            // ENTITY_STATUS uses a fixed-width entity ID, not a VarInt.
+            entityId = ByteBufHelper.readInt(buffer);
+            if (ByteBufHelper.readByte(buffer) != DEATH_STATUS) return;
+        } finally {
+            ByteBufHelper.readerIndex(buffer, readerIndex);
+        }
+        this.tags.markDead((Channel) event.getChannel(), entityId);
     }
 }

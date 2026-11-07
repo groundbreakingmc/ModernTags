@@ -1,7 +1,7 @@
 package com.github.groundbreakingmc.moderntags.requirement.impl.basic;
 
 import com.github.groundbreakingmc.moderntags.requirement.Condition;
-import com.github.groundbreakingmc.moderntags.requirement.Context;
+import org.bukkit.entity.Player;
 import com.github.groundbreakingmc.moderntags.util.ValueProvider;
 import org.jetbrains.annotations.NotNull;
 
@@ -21,9 +21,9 @@ public abstract class AbstractNumberCondition implements Condition {
     }
 
     @Override
-    public boolean test(@NotNull Context context) {
-        final var leftValue = this.toNumber(this.left.value(context), "left");
-        final var rightValue = this.toNumber(this.right.value(context), "right");
+    public boolean test(@NotNull Player player) {
+        final var leftValue = this.toNumber(this.left.value(player), "left");
+        final var rightValue = this.toNumber(this.right.value(player), "right");
         return this.compare(leftValue, rightValue);
     }
 

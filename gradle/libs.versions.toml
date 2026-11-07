@@ -3,6 +3,7 @@ shadow = "9.4.1"
 jmh = "0.7.3"
 paper = "1.21.8-R0.1-SNAPSHOT"
 packetevents = "2.11.2"
+netty = "4.1.118.Final"
 mylib = "7d2ccd9fd9"
 gikymessage = "1.0.0-beta"
 placeholderapi = "2.11.7"
@@ -14,6 +15,7 @@ bstats = "3.2.1"
 [libraries]
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
 packetevents-spigot = { module = "com.github.retrooper:packetevents-spigot", version.ref = "packetevents" }
+netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
 mylib = { module = "com.github.groundbreakingmc:MyLib", version.ref = "mylib" }
 gikymessage = { module = "com.github.groundbreakingmc:GikyMessage", version.ref = "gikymessage" }
 placeholderapi = { module = "me.clip:placeholderapi", version.ref = "placeholderapi" }

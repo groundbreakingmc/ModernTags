@@ -1,7 +1,7 @@
 package com.github.groundbreakingmc.moderntags.requirement.impl.basic;
 
 import com.github.groundbreakingmc.moderntags.requirement.Condition;
-import com.github.groundbreakingmc.moderntags.requirement.Context;
+import org.bukkit.entity.Player;
 import com.github.groundbreakingmc.moderntags.util.ValueProvider;
 import org.jetbrains.annotations.NotNull;
 
@@ -14,8 +14,8 @@ public final class BooleanCondition implements Condition {
     }
 
     @Override
-    public boolean test(@NotNull Context context) {
-        final var value = this.provider.value(context);
+    public boolean test(@NotNull Player player) {
+        final var value = this.provider.value(player);
 
         if (value instanceof Boolean booleanValue) {
             return booleanValue;

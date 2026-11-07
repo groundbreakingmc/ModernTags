@@ -1,7 +1,7 @@
 package com.github.groundbreakingmc.moderntags.requirement.impl.logic;
 
 import com.github.groundbreakingmc.moderntags.requirement.Condition;
-import com.github.groundbreakingmc.moderntags.requirement.Context;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 public final class NotCondition implements Condition {
@@ -13,7 +13,7 @@ public final class NotCondition implements Condition {
     }
 
     @Override
-    public boolean test(@NotNull Context context) {
-        return !this.condition.test(context);
+    public boolean test(@NotNull Player player) {
+        return !this.condition.test(player);
     }
 }
