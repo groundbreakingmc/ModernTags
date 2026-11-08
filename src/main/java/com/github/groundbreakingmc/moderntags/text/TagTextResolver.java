@@ -25,14 +25,19 @@ public final class TagTextResolver {
     private static final ToIntBiFunction<Player, Player> ZERO = (owner, viewer) -> 0;
 
     private final Logger logger;
-    private final boolean supportsVault;
+    private final @Nullable Chat chat;
     private final boolean supportsPapi;
 
-    private volatile @Nullable Chat chat;
-
-    public TagTextResolver(Logger logger, boolean supportsVault, boolean supportsPapi) {
+    /**
+     * Creates a resolver with integrations captured at startup.
+     *
+     * @param logger receives placeholder compilation warnings
+     * @param chat Vault chat provider, or null when unavailable
+     * @param supportsPapi whether PlaceholderAPI expansions can be resolved
+     */
+    public TagTextResolver(Logger logger, @Nullable Chat chat, boolean supportsPapi) {
         this.logger = logger;
-        this.supportsVault = supportsVault;
+        this.chat = chat;
         this.supportsPapi = supportsPapi;
     }
 
@@ -174,10 +179,9 @@ public final class TagTextResolver {
     }
 
     private @Nullable Component vaultComponent(@NotNull Player player, boolean prefix, boolean miniMessageVault) {
-        final Chat service = this.chat;
-        if (!this.supportsVault || service == null) return null;
+        if (this.chat == null) return null;
 
-        final String raw = prefix ? service.getPlayerPrefix(player) : service.getPlayerSuffix(player);
+        final String raw = prefix ? this.chat.getPlayerPrefix(player) : this.chat.getPlayerSuffix(player);
         if (raw == null || raw.isEmpty()) return Component.empty();
 
         return miniMessageVault
@@ -206,10 +210,6 @@ public final class TagTextResolver {
         } catch (NumberFormatException ignored) {
             return 0;
         }
-    }
-
-    public void chat(@Nullable Chat chat) {
-        this.chat = chat;
     }
 
     private enum Scope { OWNER, VIEWER, RELATIONAL }

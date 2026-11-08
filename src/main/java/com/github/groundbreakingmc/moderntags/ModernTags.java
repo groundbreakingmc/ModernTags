@@ -27,10 +27,6 @@ public final class ModernTags extends JavaPlugin {
         this.saveDefaultConfig();
 
         this.tagTextResolver = this.createTagTextResolver();
-        final var chatRegistration = getServer().getPluginManager().isPluginEnabled("Vault")
-                ? getServer().getServicesManager().getRegistration(Chat.class) : null;
-        if (chatRegistration != null) this.tagTextResolver.chat(chatRegistration.getProvider());
-
         this.reload();
 
         this.tags = new TagManager(this);
@@ -83,9 +79,11 @@ public final class ModernTags extends JavaPlugin {
 
     private TagTextResolver createTagTextResolver() {
         final var pm = getServer().getPluginManager();
+        final var chat = pm.getPlugin("Vault") != null
+                ? getServer().getServicesManager().load(Chat.class) : null;
         return new TagTextResolver(
                 getLogger(),
-                pm.getPlugin("Vault") != null,
+                chat,
                 pm.getPlugin("PlaceholderAPI") != null
         );
     }
