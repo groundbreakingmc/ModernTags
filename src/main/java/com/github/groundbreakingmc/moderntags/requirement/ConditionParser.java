@@ -5,28 +5,12 @@ import com.github.groundbreakingmc.moderntags.requirement.impl.logic.AndConditio
 import com.github.groundbreakingmc.moderntags.requirement.impl.logic.NotCondition;
 import com.github.groundbreakingmc.moderntags.requirement.impl.logic.OrCondition;
 import com.github.groundbreakingmc.moderntags.util.ValueProvider;
-import com.github.retrooper.packetevents.PacketEvents;
-import me.clip.placeholderapi.PlaceholderAPIPlugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 
 public final class ConditionParser {
-
-    private static final Map<String, FunctionDefinition> FUNCTIONS = Map.of(
-            "hasPermission", arguments -> {
-                final var permission = (String) arguments.get(0).value(null);
-                Objects.requireNonNull(permission, "permission can't be null!");
-                return player -> player.hasPermission(permission);
-            }
-    );
-    private static final Map<String, ValueProvider<?>> VARIABLES = Map.of(
-            "protocol_version", player -> PacketEvents.getAPI().getPlayerManager()
-                    .getClientVersion(player).getProtocolVersion()
-    );
 
     private final String rawCondition;
     private final char[] chars;
@@ -134,13 +118,11 @@ public final class ConditionParser {
         final char peek = this.peek();
 
         if (peek == '"' || peek == '\'') {
-            final var value = this.parseString();
-            return context -> value;
+            return ConditionValues.literal(this.parseString());
         }
 
         if (peek == '-' || Character.isDigit(peek)) {
-            final var value = this.parseNumber();
-            return context -> value;
+            return ConditionValues.literal(this.parseNumber());
         }
 
         if (peek == '%') {
@@ -148,20 +130,7 @@ public final class ConditionParser {
             final var key = this.parseIdentifier();
             this.expect("%");
 
-            final int sepIdx = key.indexOf('_');
-            final var identifier = (sepIdx != -1 ? key.substring(0, sepIdx) : key)
-                    .toLowerCase(Locale.ROOT);
-            final var params = sepIdx != -1 ? key.substring(sepIdx + 1) : "";
-
-            return player -> {
-                // Resolve on evaluation so expansion registration changes remain visible.
-                final var expansion = PlaceholderAPIPlugin.getInstance()
-                        .getLocalExpansionManager()
-                        .getExpansion(identifier);
-                return expansion != null
-                        ? expansion.onRequest(player, params)
-                        : "no expansion found for placeholder: %" + key + "%";
-            };
+            return ConditionValues.placeholder(key);
         }
 
         final boolean variable = peek == '{';
@@ -181,38 +150,29 @@ public final class ConditionParser {
 
     private ValueProvider<?> parseFunctionCall(String functionName) {
         this.expect("(");
-
         final var arguments = new ArrayList<ValueProvider<?>>();
         this.skipWhitespace();
-
         if (this.peek() != ')') {
             while (true) {
                 arguments.add(this.parseExpression());
                 this.skipWhitespace();
-
-                if (this.peek() == ')') {
-                    break;
-                }
-
+                if (this.peek() == ')') break;
                 this.expect(",");
             }
         }
-
         this.expect(")");
-
-        final var function = FUNCTIONS.get(functionName);
-        if (function == null) {
-            throw new IllegalArgumentException("Unknown function: '" + functionName
-                    + "' in expression: " + this.rawCondition);
+        try {
+            return ConditionFunctions.compile(functionName, arguments);
+        } catch (IllegalArgumentException failure) {
+            throw new IllegalArgumentException(failure.getMessage() + " at position " + this.pos
+                    + " in expression: " + this.rawCondition, failure);
         }
-
-        return function.create(arguments);
     }
 
     private ValueProvider<?> parseVariable(String identifier) {
         this.expect("}");
 
-        final var variable = VARIABLES.get(identifier);
+        final var variable = ConditionValues.variable(identifier);
         if (variable != null) {
             return variable;
         }
