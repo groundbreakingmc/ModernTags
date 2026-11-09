@@ -91,8 +91,8 @@ public final class TagTextResolver {
 
     private @NotNull ValueResolver<Context> bindText(@NotNull String key, boolean miniMessageVault) {
         return switch (key) {
-            case "owner:name" -> (pair, value) -> value.component(pair.owner().name());
-            case "viewer:name" -> (pair, value) -> value.component(pair.viewer().name());
+            case "owner:name" -> (pair, value) -> value.text(pair.owner().getName());
+            case "viewer:name" -> (pair, value) -> value.text(pair.viewer().getName());
 
             case "owner:health" -> (pair, value) -> value.number(NumberUtils.healthToInt(pair.owner().getHealth()));
             case "viewer:health" -> (pair, value) -> value.number(NumberUtils.healthToInt(pair.viewer().getHealth()));
