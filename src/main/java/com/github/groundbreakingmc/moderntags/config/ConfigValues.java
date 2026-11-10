@@ -14,7 +14,6 @@ import com.github.groundbreakingmc.mylib.config.Config;
 import com.github.groundbreakingmc.mylib.config.ConfigBackends;
 import com.github.groundbreakingmc.mylib.config.ConfigFactory;
 import com.google.common.collect.ImmutableList;
-import com.github.retrooper.packetevents.PacketEvents;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.jetbrains.annotations.NotNull;
@@ -123,9 +122,8 @@ public record ConfigValues(
                     .sorted(Comparator.comparingInt(TagGroup::priority).reversed())
                     .collect(ImmutableList.toImmutableList()));
 
-            final var version = PacketEvents.getAPI().getServerManager().getVersion();
             for (final var tag : modernCache.values()) {
-                modernFrames.put(tag, ModernRenderer.compileFrames(tag, version));
+                modernFrames.put(tag, ModernRenderer.compileFrames(tag));
             }
             return selector;
         }

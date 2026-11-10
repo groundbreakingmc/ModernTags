@@ -10,7 +10,6 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import org.bukkit.Bukkit;
 import com.github.groundbreakingmc.moderntags.render.ModernRenderer.CompiledFrame;
-import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams.TeamMode;
 import io.netty.channel.Channel;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
@@ -35,8 +34,15 @@ public final class TagManager {
     private final ModernTags plugin;
     private final RenderTicker ticker;
 
-    /** Creates the manager; configuration is read from the current published generation. */
+    /**
+     * Creates the manager; configuration is read from the current published generation.
+     * Natively written packets are first compared with PacketEvents' encoding, so an
+     * unsupported server protocol fails here, during startup.
+     *
+     * @throws IllegalStateException when this server's protocol lays a packet out differently
+     */
     public TagManager(@NotNull ModernTags plugin) {
+        ModernRenderer.verify();
         this.plugin = plugin;
         this.ticker = new RenderTicker(plugin);
     }
@@ -455,7 +461,8 @@ public final class TagManager {
             return false;
         }
         if (subscription.definition instanceof ModernTag modern) {
-            return this.renderModern(subscription, target, config.modernFrames(modern).get(frame.index()), frame.text());
+            return this.renderModern(subscription, target, config.modernFrames(modern).get(frame.index()),
+                    frame.encodedText());
         }
         return this.renderLegacy(subscription, target, (LegacyTag) subscription.definition, frame);
     }
@@ -465,7 +472,7 @@ public final class TagManager {
      * The tag identity and spawn position are needed only when the display is created.
      */
     private boolean renderModern(RenderTicker.Subscription subscription, TrackedPlayer target,
-                                 CompiledFrame frame, Component text) {
+                                 CompiledFrame frame, byte[] text) {
         final var channel = subscription.viewer.channel;
         final byte opacity = frame.opacity(target.sneaking);
         if (target.display != null) {
@@ -478,10 +485,8 @@ public final class TagManager {
         this.renderTeam(channel, subscription.entityId, target,
                 target.team == null ? owner.getName() : target.team.playerName,
                 null, NamedTextColor.WHITE, Component.empty(), Component.empty(), false);
-        final var location = owner.getLocation();
-        final var position = new Vector3d(location.getX(), location.getY() + 1.8, location.getZ());
         target.display = new ModernDisplay(channel, identity.tagEntityId, identity.tagUniqueId,
-                position, frame, text, opacity);
+                owner.getX(), owner.getY() + 1.8, owner.getZ(), frame, text, opacity);
         this.scheduleAttachment(channel, subscription.entityId, target, subscription.config);
         return true;
     }

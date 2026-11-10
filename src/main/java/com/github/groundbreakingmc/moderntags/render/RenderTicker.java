@@ -9,6 +9,7 @@ import com.github.retrooper.packetevents.PacketEvents;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -286,11 +287,11 @@ public final class RenderTicker {
             }
         } else if (!due) {
             complete = this.prepareForViewer(added, source.commonFrame,
-                    textTemplate, suffixTemplate, scoreDependent, config);
+                    textTemplate, suffixTemplate, legacy, scoreDependent, config);
         } else {
             for (int i = 0; i < source.subscriptions.size(); i++) {
                 if (!this.prepareForViewer(source.subscriptions.get(i), source.commonFrame,
-                        textTemplate, suffixTemplate, scoreDependent, config)) complete = false;
+                        textTemplate, suffixTemplate, legacy, scoreDependent, config)) complete = false;
             }
         }
         if (due || !complete) {
@@ -309,7 +310,7 @@ public final class RenderTicker {
         final var belowNameValue = config.belowNameValue();
         final int score = !legacy || belowNameValue.viewerDependent() ? 0
                 : belowNameValue.compiled().applyAsInt(this.players.owner, this.players.owner);
-        return frame(previous, index, text, suffix, score);
+        return frame(previous, index, text, suffix, score, legacy);
     }
 
     /**
@@ -318,7 +319,7 @@ public final class RenderTicker {
      */
     private boolean prepareForViewer(Subscription subscription, Frame commonFrame,
                                      TagTextResolver.Template textTemplate, TagTextResolver.Template suffixTemplate,
-                                     boolean scoreDependent, ConfigValues config) {
+                                     boolean legacy, boolean scoreDependent, ConfigValues config) {
         try {
             final var viewer = Bukkit.getPlayer(subscription.viewerId);
             if (viewer == null) return false;
@@ -329,7 +330,7 @@ public final class RenderTicker {
                     ? resolver.resolve(this.players, suffixTemplate) : commonFrame.suffix;
             final int score = scoreDependent ? config.belowNameValue().compiled().applyAsInt(this.players.owner, viewer)
                     : commonFrame.score;
-            this.publish(subscription, frame(subscription.latest, commonFrame.index, text, suffix, score));
+            this.publish(subscription, frame(subscription.latest, commonFrame.index, text, suffix, score, legacy));
             return true;
         } catch (RuntimeException failure) {
             this.plugin.getLogger().log(Level.WARNING, "Failed to resolve tag for " + subscription.ownerId, failure);
@@ -337,10 +338,16 @@ public final class RenderTicker {
         }
     }
 
-    private static Frame frame(Frame previous, int index, Component text, Component suffix, int score) {
+    /**
+     * Keeps the previous frame when nothing changed. A new modern frame encodes its text here,
+     * on the ticker, so every viewer copies the same bytes instead of serializing the component.
+     */
+    private static Frame frame(Frame previous, int index, Component text, Component suffix, int score,
+                               boolean legacy) {
         if (previous != null && previous.index == index && previous.score == score
                 && Objects.equals(previous.text, text) && Objects.equals(previous.suffix, suffix)) return previous;
-        return new Frame(index, text, suffix, score);
+        return new Frame(index, text, suffix, score,
+                legacy || text == null ? null : ModernRenderer.encodeText(text));
     }
 
     private void publish(Subscription subscription, Frame frame) {
@@ -403,8 +410,12 @@ public final class RenderTicker {
      * Prepared values for one animation frame. A common frame can leave viewer-dependent
      * text or suffix null and a viewer-dependent score at zero. A frame published to a
      * subscription contains complete values.
+     *
+     * <p>{@code encodedText} is the text's TextDisplay metadata entry from
+     * {@link ModernRenderer#encodeText}, shared by every viewer of this frame and never
+     * modified. It is null for legacy definitions and while the text itself is null.
      */
-    record Frame(int index, Component text, Component suffix, int score) { }
+    record Frame(int index, Component text, Component suffix, int score, byte @Nullable [] encodedText) { }
 
     /** Direct template rendering does not retain this context; only the ticker uses it, synchronously. */
     private static final class Players implements TagTextResolver.Context {

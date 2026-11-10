@@ -1,9 +1,7 @@
 package com.github.groundbreakingmc.moderntags.render;
 
 import com.github.groundbreakingmc.moderntags.render.ModernRenderer.CompiledFrame;
-import com.github.retrooper.packetevents.util.Vector3d;
 import io.netty.channel.Channel;
-import net.kyori.adventure.text.Component;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
@@ -18,18 +16,21 @@ public final class ModernDisplay {
 
     private final int entityId;
     private CompiledFrame frame;
-    private Component text;
+    /** Last applied text entry, as encoded by {@link ModernRenderer#encodeText}. Never modified. */
+    private byte[] text;
     private byte opacity;
     private boolean attached;
 
     /**
      * Spawns a display with full metadata using the owner's shared tag identity.
      * The caller retains this instance while the tag is shown; attachment is separate.
+     *
+     * @param text the frame's text entry from {@link ModernRenderer#encodeText}
      */
     public ModernDisplay(@NotNull Channel viewer, int entityId, @NotNull UUID uniqueId,
-                         @NotNull Vector3d position, @NotNull CompiledFrame frame,
-                         @NotNull Component text, byte opacity) {
-        ModernRenderer.spawn(viewer, entityId, uniqueId, position, frame, text, opacity);
+                         double x, double y, double z, @NotNull CompiledFrame frame,
+                         byte @NotNull [] text, byte opacity) {
+        ModernRenderer.spawn(viewer, entityId, uniqueId, x, y, z, frame, text, opacity);
         this.entityId = entityId;
         this.frame = frame;
         this.text = text;
@@ -44,9 +45,13 @@ public final class ModernDisplay {
         this.attached = false;
     }
 
-    /** Applies new metadata, remembering the predecessor even when no packet is needed. */
+    /**
+     * Applies new metadata, remembering the predecessor even when no packet is needed.
+     *
+     * @param text the frame's text entry from {@link ModernRenderer#encodeText}
+     */
     public void update(@NotNull Channel viewer, @NotNull CompiledFrame frame,
-                       @NotNull Component text, byte opacity) {
+                       byte @NotNull [] text, byte opacity) {
         ModernRenderer.updateMetadata(viewer, this.entityId, frame, text, opacity,
                 this.frame, this.text, this.opacity);
         this.frame = frame;
