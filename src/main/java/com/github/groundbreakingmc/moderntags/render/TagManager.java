@@ -43,6 +43,7 @@ public final class TagManager {
      */
     public TagManager(@NotNull ModernTags plugin) {
         ModernRenderer.verify();
+        LegacyRenderer.verify();
         this.plugin = plugin;
         this.ticker = new RenderTicker(plugin);
     }
