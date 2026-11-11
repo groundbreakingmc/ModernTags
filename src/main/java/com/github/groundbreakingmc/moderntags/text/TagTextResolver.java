@@ -3,6 +3,7 @@ package com.github.groundbreakingmc.moderntags.text;
 import com.github.groundbreakingmc.gikymessage.Text;
 import com.github.groundbreakingmc.gikymessage.ValueResolver;
 import com.github.groundbreakingmc.moderntags.util.NumberUtils;
+import com.github.groundbreakingmc.moderntags.util.PaperApi;
 import me.clip.placeholderapi.PlaceholderAPIPlugin;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import me.clip.placeholderapi.expansion.Relational;
@@ -72,8 +73,8 @@ public final class TagTextResolver {
             case "owner:name" -> (owner, viewer) -> parseInt(owner.getName());
             case "viewer:name" -> (owner, viewer) -> parseInt(viewer.getName());
 
-            case "owner:display_name" -> (owner, viewer) -> componentToInt(owner.displayName());
-            case "viewer:display_name" -> (owner, viewer) -> componentToInt(viewer.displayName());
+            case "owner:display_name" -> (owner, viewer) -> componentToInt(displayName(owner));
+            case "viewer:display_name" -> (owner, viewer) -> componentToInt(displayName(viewer));
 
             case "owner:prefix" -> (owner, viewer) -> componentToInt(this.vaultComponent(owner, true, miniMessageVault));
             case "owner:suffix" -> (owner, viewer) -> componentToInt(this.vaultComponent(owner, false, miniMessageVault));
@@ -97,8 +98,8 @@ public final class TagTextResolver {
             case "owner:health" -> (pair, value) -> value.number(NumberUtils.healthToInt(pair.owner().getHealth()));
             case "viewer:health" -> (pair, value) -> value.number(NumberUtils.healthToInt(pair.viewer().getHealth()));
 
-            case "owner:display_name" -> (pair, value) -> value.component(pair.owner().displayName());
-            case "viewer:display_name" -> (pair, value) -> value.component(pair.viewer().displayName());
+            case "owner:display_name" -> (pair, value) -> value.component(displayName(pair.owner()));
+            case "viewer:display_name" -> (pair, value) -> value.component(displayName(pair.viewer()));
 
             case "owner:prefix" -> (pair, value) -> value.component(this.vaultComponent(pair.owner(), true, miniMessageVault));
             case "owner:suffix" -> (pair, value) -> value.component(this.vaultComponent(pair.owner(), false, miniMessageVault));
@@ -197,6 +198,13 @@ public final class TagTextResolver {
     private void warnUnknown(@NotNull String key) {
         this.logger.warning("Unknown placeholder '" + key + "'. "
                 + "If this is intended to be plain text and not a placeholder, escape it using '\\'.");
+    }
+
+    @SuppressWarnings("deprecation") // the legacy getter is the only display name on Spigot
+    private static @NotNull Component displayName(@NotNull Player player) {
+        return PaperApi.COMPONENT_DISPLAY_NAMES
+                ? player.displayName()
+                : LegacyComponentSerializer.legacySection().deserialize(player.getDisplayName());
     }
 
     private static int componentToInt(@Nullable Component component) {

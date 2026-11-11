@@ -6,6 +6,7 @@ import com.github.groundbreakingmc.moderntags.config.model.LegacyTag;
 import com.github.groundbreakingmc.moderntags.config.model.ModernTag;
 import com.github.groundbreakingmc.moderntags.config.model.TagEntry;
 import com.github.groundbreakingmc.moderntags.config.ConfigValues;
+import com.github.groundbreakingmc.moderntags.util.PaperApi;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import org.bukkit.Bukkit;
@@ -487,8 +488,13 @@ public final class TagManager {
         this.renderTeam(channel, target,
                 target.team == null ? owner.getName() : target.team.playerName,
                 null, NamedTextColor.WHITE, Component.empty(), Component.empty(), false);
+        // Only Spigot needs a Location; Paper reads the coordinates directly.
+        final var location = PaperApi.ENTITY_COORDINATES ? null : owner.getLocation();
+        final double x = location == null ? owner.getX() : location.getX();
+        final double y = location == null ? owner.getY() : location.getY();
+        final double z = location == null ? owner.getZ() : location.getZ();
         target.display = new ModernDisplay(channel, identity.tagEntityId, identity.tagUniqueId,
-                owner.getX(), owner.getY() + 1.8, owner.getZ(), frame, text, opacity);
+                x, y + 1.8, z, frame, text, opacity);
         this.scheduleAttachment(channel, subscription.entityId, target, subscription.config);
         return true;
     }
