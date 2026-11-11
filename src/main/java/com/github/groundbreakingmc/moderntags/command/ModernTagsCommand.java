@@ -3,7 +3,6 @@ package com.github.groundbreakingmc.moderntags.command;
 import com.github.groundbreakingmc.moderntags.ModernTags;
 import com.github.groundbreakingmc.mylib.command.CommandUtils;
 import com.github.groundbreakingmc.mylib.updateschecker.UpdatesChecker;
-import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -33,6 +32,7 @@ public final class ModernTagsCommand implements TabExecutor {
 
     /**
      * Reloads configuration synchronously, or checks for and downloads an update asynchronously.
+     * The server checks the command permission from plugin.yml before calling this method.
      *
      * @param sender  the command sender
      * @param command the registered command
@@ -42,11 +42,6 @@ public final class ModernTagsCommand implements TabExecutor {
      */
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String @NotNull [] args) {
-        if (!sender.hasPermission("moderntags.admin")) {
-            sender.sendMessage(Bukkit.permissionMessage());
-            return true;
-        }
-
         if (args.length == 0 || args[0].equalsIgnoreCase("reload")) {
             this.reloadConfiguration(sender);
         } else if (args[0].equalsIgnoreCase("update")) {
