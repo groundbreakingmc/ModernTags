@@ -25,9 +25,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>A connection plays two roles. As a viewer, only its own EventLoop touches
  * {@link #targets}, {@link #spectators}, {@link #teams} and {@link #belowName}. As a tag
- * owner, other EventLoops read the final {@link #tagEntityId} and {@link #tagUniqueId},
- * which are safely published by the attribute's atomic update. Condition snapshots are
- * published separately by the ticker through volatile fields.
+ * owner, other EventLoops read the final {@link #tagEntityId}, {@link #tagUniqueId} and
+ * {@link #teamName}, which are safely published by the attribute's atomic update. Condition
+ * snapshots are published separately by the ticker through volatile fields.
  *
  * <p>Netty attribute names are shared by all class loaders. The value must therefore be
  * removed during shutdown cleanup with {@link #discard} to release the plugin's class
@@ -49,6 +49,11 @@ final class ChannelState {
     final int tagEntityId = SpigotReflectionUtil.generateEntityId();
     /** UUID of this player's tag entity, fixed for the connection. */
     final @NotNull UUID tagUniqueId = UUID.randomUUID();
+    /**
+     * Name of the team that carries this player's tag for every viewer. Fixed for the connection
+     * like the tag identity it derives from, so no viewer builds the name again.
+     */
+    final @NotNull String teamName = "MT-" + Integer.toHexString(this.tagEntityId);
 
     /** Players this connection tracks, by entity ID. Viewer EventLoop only. */
     final @NotNull Int2ObjectMap<TagManager.TrackedPlayer> targets = new Int2ObjectOpenHashMap<>();

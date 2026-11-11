@@ -141,12 +141,13 @@ public final class TagManager {
         state.belowName = label;
     }
 
-    private void renderTeam(Channel viewer, int ownerEntityId, TrackedPlayer target, String playerName,
+    /** Creates or updates the target's team. A new team takes its name from the resolved owner state. */
+    private void renderTeam(Channel viewer, TrackedPlayer target, String playerName,
                             LegacyTag definition, NamedTextColor fallbackColor,
                             Component prefix, Component suffix, boolean visible) {
         final var color = this.resolveColor(viewer, playerName, definition, fallbackColor);
         if (target.team == null) {
-            final String name = "MT-" + Integer.toHexString(ownerEntityId);
+            final String name = target.ownerState.teamName;
             LegacyRenderer.create(viewer, name, playerName, prefix, suffix, color, visible);
             target.team = new ClientTeam(name, playerName, prefix, suffix, color, visible);
         } else {
@@ -483,7 +484,7 @@ public final class TagManager {
         final var owner = Bukkit.getPlayer(subscription.ownerId);
         final var identity = target.ownerState;
         if (owner == null || identity == null) return false;
-        this.renderTeam(channel, subscription.entityId, target,
+        this.renderTeam(channel, target,
                 target.team == null ? owner.getName() : target.team.playerName,
                 null, NamedTextColor.WHITE, Component.empty(), Component.empty(), false);
         target.display = new ModernDisplay(channel, identity.tagEntityId, identity.tagUniqueId,
@@ -504,11 +505,11 @@ public final class TagManager {
             playerName = target.team.playerName;
         } else {
             final var owner = Bukkit.getPlayer(subscription.ownerId);
-            if (owner == null) return false;
+            if (owner == null || target.ownerState == null) return false;
             playerName = owner.getName();
         }
         target.destroyDisplay(channel);
-        this.renderTeam(channel, subscription.entityId, target, playerName, definition,
+        this.renderTeam(channel, target, playerName, definition,
                 definition.frames().get(frame.index()).nameColor(), frame.text(), frame.suffix(), true);
         this.ensureBelowName(channel, subscription.config);
         target.team.updateScore(channel, frame.score());
