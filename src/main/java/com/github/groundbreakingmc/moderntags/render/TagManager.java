@@ -414,8 +414,8 @@ public final class TagManager {
         final var current = target.subscription;
         if (current != null && current.config == config && current.definition == definition) return;
         this.stopSubscription(target);
-        target.subscription = new RenderTicker.Subscription(ChannelState.of(channel, this), entityId, target.ownerId,
-                viewerId, config, definition);
+        target.subscription = new RenderTicker.Subscription(ChannelState.of(channel, this), target.ownerState,
+                entityId, target.ownerId, viewerId, config, definition);
         this.ticker.subscribe(target.subscription);
     }
 

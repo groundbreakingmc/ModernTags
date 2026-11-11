@@ -277,8 +277,14 @@ public final class RenderTicker {
         this.players.owner = owner;
         if (due) {
             this.players.viewer = owner;
-            source.commonFrame = this.prepareCommonFrame(source.commonFrame, index,
-                    textTemplate, suffixTemplate, legacy, config);
+            // Every subscription of a source has the same owner. A source created again after its
+            // last viewer left continues from that owner's last frame, so an unchanged tag keeps
+            // the frame and the text already encoded in it.
+            final var state = source.subscriptions.get(0).owner;
+            source.commonFrame = this.prepareCommonFrame(
+                    source.commonFrame != null ? source.commonFrame : state.lastFrame,
+                    index, textTemplate, suffixTemplate, legacy, config);
+            state.lastFrame = source.commonFrame;
         }
         boolean complete = true;
         if (!viewerDependent) {
@@ -341,11 +347,14 @@ public final class RenderTicker {
     /**
      * Keeps the previous frame when nothing changed. A new modern frame encodes its text here,
      * on the ticker, so every viewer copies the same bytes instead of serializing the component.
+     * A previous frame inherited from the owner's legacy definition has no encoded text and is
+     * not reused for a modern one.
      */
     private static Frame frame(Frame previous, int index, Component text, Component suffix, int score,
                                boolean legacy) {
         if (previous != null && previous.index == index && previous.score == score
-                && Objects.equals(previous.text, text) && Objects.equals(previous.suffix, suffix)) return previous;
+                && Objects.equals(previous.text, text) && Objects.equals(previous.suffix, suffix)
+                && (legacy || text == null || previous.encodedText != null)) return previous;
         return new Frame(index, text, suffix, score,
                 legacy || text == null ? null : ModernRenderer.encodeText(text));
     }
@@ -384,6 +393,8 @@ public final class RenderTicker {
     /** Identity is immutable; source links are ticker-only, latest is published, applied is EventLoop-only. */
     static final class Subscription {
         final ChannelState viewer;
+        /** State of the owner's connection, where the ticker keeps that owner's last frame. */
+        final ChannelState owner;
         final int entityId;
         final UUID ownerId;
         final UUID viewerId;
@@ -395,9 +406,10 @@ public final class RenderTicker {
         volatile Frame latest;
         Frame applied;
 
-        Subscription(ChannelState viewer, int entityId, UUID ownerId, UUID viewerId,
+        Subscription(ChannelState viewer, ChannelState owner, int entityId, UUID ownerId, UUID viewerId,
                      ConfigValues config, Object definition) {
             this.viewer = viewer;
+            this.owner = owner;
             this.entityId = entityId;
             this.ownerId = ownerId;
             this.viewerId = viewerId;
