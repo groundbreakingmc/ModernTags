@@ -70,7 +70,8 @@ public final class RenderTicker {
             if (!subscription.viewer.channel.isActive() || subscription.config != this.plugin.configValues()) return;
             this.viewers.add(subscription.viewer);
             final UUID scope = subscription.config.syncAnimationOnEachTarget() ? subscription.ownerId : null;
-            final var definitions = this.animations.computeIfAbsent(scope, ignored -> new IdentityHashMap<>());
+            // A scope rarely holds more than two definitions; the default table reserves 32.
+            final var definitions = this.animations.computeIfAbsent(scope, ignored -> new IdentityHashMap<>(2));
             final var animation = definitions.computeIfAbsent(subscription.definition, ignored -> new Animation(this.tick));
             final var source = animation.owners.computeIfAbsent(subscription.ownerId, ignored -> new OwnerFrames());
             subscription.animation = animation;
@@ -447,8 +448,11 @@ public final class RenderTicker {
 
     private static final class Animation {
         private final long started;
-        /** Sources are removed with their last subscription; an empty map ends this clock. */
-        private final Map<UUID, OwnerFrames> owners = new HashMap<>();
+        /**
+         * Sources are removed with their last subscription; an empty map ends this clock.
+         * Sized for the single owner of a per-target clock; a shared clock grows as owners join.
+         */
+        private final Map<UUID, OwnerFrames> owners = new HashMap<>(2);
 
         private Animation(long started) {
             this.started = started;
