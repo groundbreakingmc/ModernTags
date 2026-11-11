@@ -5,6 +5,7 @@ paper = "1.21.8-R0.1-SNAPSHOT"
 packetevents = "2.11.2"
 netty = "4.1.118.Final"
 mylib = "7d2ccd9fd9"
+adventure = "4.25.0"
 gikymessage = "1.0.0-beta"
 placeholderapi = "2.11.7"
 vaultapi = "1.7"
@@ -17,7 +18,11 @@ paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
 packetevents-spigot = { module = "com.github.retrooper:packetevents-spigot", version.ref = "packetevents" }
 netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
 mylib = { module = "com.github.groundbreakingmc:MyLib", version.ref = "mylib" }
-gikymessage = { module = "com.github.groundbreakingmc:GikyMessage", version.ref = "gikymessage" }
+adventure-api = { module = "net.kyori:adventure-api", version.ref = "adventure" }
+adventure-minimessage = { module = "net.kyori:adventure-text-minimessage", version.ref = "adventure" }
+adventure-serializer-legacy = { module = "net.kyori:adventure-text-serializer-legacy", version.ref = "adventure" }
+adventure-serializer-plain = { module = "net.kyori:adventure-text-serializer-plain", version.ref = "adventure" }
+gikymessage ={ module = "com.github.groundbreakingmc:GikyMessage", version.ref = "gikymessage" }
 placeholderapi = { module = "me.clip:placeholderapi", version.ref = "placeholderapi" }
 vaultapi = { module = "com.github.MilkBowl:VaultAPI", version.ref = "vaultapi" }
 luckperms-api = { module = "net.luckperms:api", version.ref = "luckperms-api" }

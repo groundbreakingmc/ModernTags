@@ -29,6 +29,14 @@ dependencies {
     // Source: https://github.com/groundbreakingmc/GikyMessage
     implementation(libs.gikymessage)
 
+    // Spigot has no Adventure serializers, and PacketEvents bundles adventure-api without them.
+    // Paper loads its own copies first, so the packaged classes are used only on Spigot.
+    // Source: https://github.com/KyoriPowered/adventure
+    implementation(libs.adventure.api) { isTransitive = false }
+    implementation(libs.adventure.minimessage) { isTransitive = false }
+    implementation(libs.adventure.serializer.legacy) { isTransitive = false }
+    implementation(libs.adventure.serializer.plain) { isTransitive = false }
+
     // Source: https://github.com/PlaceholderAPI/PlaceholderAPI
     compileOnly(libs.placeholderapi)
 
@@ -74,6 +82,14 @@ tasks {
         )
 
         relocate("org.bstats", "com.github.groundbreakingmc.moderntags.libs.bstats")
+
+        // Adventure stays unrelocated to share Component with the server or PacketEvents.
+        // Of adventure-api, only the serializer interfaces that PacketEvents strips are packaged.
+        exclude {
+            it.path.startsWith("net/kyori/")
+                    && !it.path.startsWith("net/kyori/adventure/text/serializer/")
+                    && !it.path.startsWith("net/kyori/adventure/text/minimessage/")
+        }
 
         minimize()
     }
