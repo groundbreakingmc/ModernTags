@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * owner, other EventLoops read the final {@link #tagEntityId}, {@link #tagUniqueId} and
  * {@link #teamName}, which are safely published by the attribute's atomic update. Condition
  * snapshots are published separately by the ticker through volatile fields; the ticker also
- * keeps the owner's {@link #lastFrame} here for its own use.
+ * keeps the owner's {@link #sources} here for its own use.
  *
  * <p>Netty attribute names are shared by all class loaders. The value must therefore be
  * removed during shutdown cleanup with {@link #discard} to release the plugin's class
@@ -82,11 +82,11 @@ final class ChannelState {
      */
     volatile @Nullable ViewerSnapshot viewerSnapshot;
     /**
-     * Last owner-only frame the ticker prepared for this player's tag. When every viewer has left
-     * and one returns, an unchanged tag continues with this frame instead of encoding its text
-     * again. Ticker thread only; replaced by each newer frame, so at most one is retained.
+     * This player's tag sources, one per definition some viewer has asked for, created on first
+     * use. A source stays here while nobody consumes it, so a returning viewer reuses it and an
+     * unchanged tag keeps its frame; each idle source retains its last frame. Ticker thread only.
      */
-    RenderTicker.@Nullable Frame lastFrame;
+    @Nullable List<RenderTicker.Source> sources;
 
     private ChannelState(Channel channel, TagManager tags) {
         this.channel = channel;

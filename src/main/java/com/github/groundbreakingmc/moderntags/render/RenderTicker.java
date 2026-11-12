@@ -12,7 +12,6 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -30,6 +29,10 @@ import java.util.logging.Level;
  * It prepares a source only when its frame or placeholder deadline changes, then publishes
  * complete immutable results through Subscription.latest. EventLoops own applied state and
  * reconcile the latest conditions and frames through one reusable notification per connection.
+ *
+ * <p>A source belongs to one owner and one definition and is kept in that owner's
+ * {@link ChannelState}, so a tag that loses its last viewer and gets one back allocates
+ * nothing.
  */
 public final class RenderTicker {
 
@@ -37,7 +40,10 @@ public final class RenderTicker {
     private final ScheduledThreadPoolExecutor executor;
     private final Runnable tickTask = this::runTick;
     private final Set<ChannelState> viewers = new HashSet<>();
-    private final Map<UUID, IdentityHashMap<Object, Animation>> animations = new HashMap<>();
+    /** Sources that have a consumer, in no particular order; each knows its position here. */
+    private final List<Source> active = new ArrayList<>();
+    /** Clocks of definitions whose owners animate together; absent while a definition has no consumer. */
+    private final Map<Object, Clock> sharedClocks = new IdentityHashMap<>();
     private final Players players = new Players();
     private ConfigValues configuration;
     private long tick;
@@ -66,46 +72,94 @@ public final class RenderTicker {
 
     /** Adds a consumer and prepares its current result without waiting for the next tick. */
     void subscribe(Subscription subscription) {
-        this.execute(() -> {
-            if (!subscription.viewer.channel.isActive() || subscription.config != this.plugin.configValues()) return;
-            this.viewers.add(subscription.viewer);
-            final UUID scope = subscription.config.syncAnimationOnEachTarget() ? subscription.ownerId : null;
-            // A scope rarely holds more than two definitions; the default table reserves 32.
-            final var definitions = this.animations.computeIfAbsent(scope, ignored -> new IdentityHashMap<>(2));
-            final var animation = definitions.computeIfAbsent(subscription.definition, ignored -> new Animation(this.tick));
-            final var source = animation.owners.computeIfAbsent(subscription.ownerId, ignored -> new OwnerFrames());
-            subscription.animation = animation;
-            subscription.ownerFrames = source;
-            source.subscriptions.add(subscription);
-            final int index = this.frameIndex(subscription.definition, animation);
-            final boolean due = this.isDue(source, index);
-            this.prepareSafely(subscription.ownerId, source, subscription.definition,
-                    index, subscription.config, subscription);
-            if (due) {
-                for (final var consumer : source.subscriptions) this.notifyViewer(consumer.viewer);
-            } else {
-                this.notifyViewer(subscription.viewer);
-            }
-        });
+        this.execute(() -> this.add(subscription));
     }
 
-    /** Removes a consumer; the last consumer releases its source and animation clock. */
+    /** Removes a consumer; the last consumer stops its source and animation clock. */
     void unsubscribe(Subscription subscription) {
         this.execute(() -> this.remove(subscription));
     }
 
+    private void add(Subscription subscription) {
+        if (!subscription.viewer.channel.isActive() || subscription.config != this.plugin.configValues()) return;
+        this.viewers.add(subscription.viewer);
+        final var source = this.source(subscription);
+        subscription.source = source;
+        source.subscriptions.add(subscription);
+        if (source.activeIndex < 0) this.activate(source);
+        final int index = this.frameIndex(source);
+        final boolean due = this.isDue(source, index);
+        this.prepareSafely(source, index, subscription);
+        if (due) {
+            for (int i = 0; i < source.subscriptions.size(); i++) {
+                this.notifyViewer(source.subscriptions.get(i).viewer);
+            }
+        } else {
+            this.notifyViewer(subscription.viewer);
+        }
+    }
+
     private void remove(Subscription subscription) {
-        final var source = subscription.ownerFrames;
+        final var source = subscription.source;
         if (source == null || !source.subscriptions.remove(subscription)) return;
-        final var animation = subscription.animation;
-        subscription.ownerFrames = null;
-        subscription.animation = null;
-        if (source.subscriptions.isEmpty()) animation.owners.remove(subscription.ownerId);
-        if (!animation.owners.isEmpty()) return;
-        final UUID scope = subscription.config.syncAnimationOnEachTarget() ? subscription.ownerId : null;
-        final var definitions = this.animations.get(scope);
-        definitions.remove(subscription.definition);
-        if (definitions.isEmpty()) this.animations.remove(scope);
+        subscription.source = null;
+        if (source.subscriptions.isEmpty()) this.deactivate(source);
+    }
+
+    /**
+     * Returns the owner's source for the subscription's definition, creating it on first use.
+     * Idle sources of a replaced configuration are dropped on the way: nothing asks for them again.
+     */
+    private Source source(Subscription subscription) {
+        var sources = subscription.owner.sources;
+        if (sources == null) {
+            // An owner usually has one definition in use, sometimes a second for other viewers.
+            sources = new ArrayList<>(2);
+            subscription.owner.sources = sources;
+        }
+        for (int i = sources.size() - 1; i >= 0; i--) {
+            final var source = sources.get(i);
+            if (source.definition == subscription.definition) return source;
+            if (source.config != subscription.config && source.activeIndex < 0) sources.remove(i);
+        }
+        final var created = new Source(subscription.ownerId, subscription.config, subscription.definition);
+        sources.add(created);
+        return created;
+    }
+
+    /**
+     * Starts a source for its first consumer: the animation begins at frame zero, or joins the
+     * clock its definition shares, and the text is resolved again whatever the idle source holds.
+     */
+    private void activate(Source source) {
+        source.activeIndex = this.active.size();
+        this.active.add(source);
+        source.nextTextTick = 0;
+        if (source.config.syncAnimationOnEachTarget()) {
+            source.started = this.tick;
+            return;
+        }
+        var clock = this.sharedClocks.get(source.definition);
+        if (clock == null) {
+            clock = new Clock(this.tick);
+            this.sharedClocks.put(source.definition, clock);
+        }
+        clock.sources++;
+        source.sharedClock = clock;
+    }
+
+    /** Stops a source that lost its last consumer; the last source of a shared clock ends that clock. */
+    private void deactivate(Source source) {
+        final int last = this.active.size() - 1;
+        final var moved = this.active.get(last);
+        this.active.set(source.activeIndex, moved);
+        moved.activeIndex = source.activeIndex;
+        this.active.remove(last);
+        source.activeIndex = -1;
+        final var clock = source.sharedClock;
+        if (clock == null) return;
+        source.sharedClock = null;
+        if (--clock.sources == 0) this.sharedClocks.remove(source.definition);
     }
 
     private void runTick() {
@@ -135,41 +189,33 @@ public final class RenderTicker {
         if (rescanAll) {
             for (final var viewer : this.viewers) viewer.dirty = true;
         }
-        for (final var definitions : this.animations.values()) {
-            for (final var entry : definitions.entrySet()) {
-                final var definition = entry.getKey();
-                final var animation = entry.getValue();
-                final int index = this.frameIndex(definition, animation);
-                for (final var owner : animation.owners.entrySet()) {
-                    this.prepareSafely(owner.getKey(), owner.getValue(), definition, index, config, null);
-                }
-            }
+        for (int i = 0; i < this.active.size(); i++) {
+            final var source = this.active.get(i);
+            this.prepareSafely(source, this.frameIndex(source), null);
         }
         this.notifyViewers();
     }
 
     private void prune(ConfigValues config) {
-        final var scopes = this.animations.values().iterator();
-        while (scopes.hasNext()) {
-            final var definitions = scopes.next();
-            final var clocks = definitions.values().iterator();
-            while (clocks.hasNext()) {
-                final var animation = clocks.next();
-                final var owners = animation.owners.values().iterator();
-                while (owners.hasNext()) {
-                    final var source = owners.next();
-                    for (int i = source.subscriptions.size() - 1; i >= 0; i--) {
-                        final var subscription = source.subscriptions.get(i);
-                        if (subscription.viewer.channel.isActive() && subscription.config == config) continue;
-                        source.subscriptions.remove(i);
-                        subscription.ownerFrames = null;
-                        subscription.animation = null;
-                    }
-                    if (source.subscriptions.isEmpty()) owners.remove();
-                }
-                if (animation.owners.isEmpty()) clocks.remove();
+        // Backwards: stopping a source moves the last one, already visited, into its place.
+        for (int i = this.active.size() - 1; i >= 0; i--) {
+            final var source = this.active.get(i);
+            for (int j = source.subscriptions.size() - 1; j >= 0; j--) {
+                final var subscription = source.subscriptions.get(j);
+                if (subscription.viewer.channel.isActive() && subscription.config == config) continue;
+                source.subscriptions.remove(j);
+                subscription.source = null;
             }
-            if (definitions.isEmpty()) scopes.remove();
+            if (source.subscriptions.isEmpty()) this.deactivate(source);
+        }
+        // Idle sources of a replaced configuration would keep its definitions alive.
+        for (final var state : this.viewers) {
+            final var sources = state.sources;
+            if (sources == null) continue;
+            for (int i = sources.size() - 1; i >= 0; i--) {
+                final var source = sources.get(i);
+                if (source.config != config && source.activeIndex < 0) sources.remove(i);
+            }
         }
     }
 
@@ -212,53 +258,54 @@ public final class RenderTicker {
         viewer.requestUpdates();
     }
 
-    private boolean isDue(OwnerFrames source, int index) {
+    private boolean isDue(Source source, int index) {
         return source.commonFrame == null || source.commonFrame.index != index || this.tick >= source.nextTextTick;
     }
 
-    private int frameIndex(Object definition, Animation animation) {
+    private int frameIndex(Source source) {
         final int rate;
         final int size;
-        if (definition instanceof ModernTag modern) {
+        if (source.definition instanceof ModernTag modern) {
             rate = modern.frameUpdateRate();
             size = modern.frames().size();
         } else {
-            final var legacy = (LegacyTag) definition;
+            final var legacy = (LegacyTag) source.definition;
             rate = legacy.frameUpdateRate();
             size = legacy.frames().size();
         }
-        return rate > 0 ? (int) ((this.tick - animation.started) / rate % size) : 0;
+        if (rate <= 0) return 0;
+        final long started = source.sharedClock != null ? source.sharedClock.started : source.started;
+        return (int) ((this.tick - started) / rate % size);
     }
 
-    private void prepareSafely(UUID ownerId, OwnerFrames source, Object definition, int index,
-                               ConfigValues config, Subscription added) {
+    private void prepareSafely(Source source, int index, Subscription added) {
         try {
-            this.prepare(ownerId, source, definition, index, config, added);
+            this.prepare(source, index, added);
         } catch (RuntimeException failure) {
             // Leave the source due so a failed initial preparation can retry on the next tick.
             source.nextTextTick = this.tick;
-            this.plugin.getLogger().log(Level.WARNING, "Failed to resolve tag for " + ownerId, failure);
+            this.plugin.getLogger().log(Level.WARNING, "Failed to resolve tag for " + source.ownerId, failure);
         } finally {
             this.players.owner = null;
             this.players.viewer = null;
         }
     }
 
-    private void prepare(UUID ownerId, OwnerFrames source, Object definition, int index,
-                         ConfigValues config, Subscription added) {
+    private void prepare(Source source, int index, Subscription added) {
         final boolean due = this.isDue(source, index);
         if (!due && added == null) return;
+        final var config = source.config;
         final TagTextResolver.Template textTemplate;
         final TagTextResolver.Template suffixTemplate;
         final boolean legacy;
         final int textRate;
-        if (definition instanceof ModernTag modern) {
+        if (source.definition instanceof ModernTag modern) {
             textTemplate = modern.frames().get(index).text();
             suffixTemplate = null;
             legacy = false;
             textRate = modern.placeholdersUpdateRate();
         } else {
-            final var tag = (LegacyTag) definition;
+            final var tag = (LegacyTag) source.definition;
             final var frame = tag.frames().get(index);
             textTemplate = frame.prefix();
             suffixTemplate = frame.suffix();
@@ -273,19 +320,15 @@ public final class RenderTicker {
             this.publish(added, source.commonFrame);
             return;
         }
-        final var owner = Bukkit.getPlayer(ownerId);
+        final var owner = Bukkit.getPlayer(source.ownerId);
         if (owner == null) return;
         this.players.owner = owner;
         if (due) {
             this.players.viewer = owner;
-            // Every subscription of a source has the same owner. A source created again after its
-            // last viewer left continues from that owner's last frame, so an unchanged tag keeps
-            // the frame and the text already encoded in it.
-            final var state = source.subscriptions.get(0).owner;
-            source.commonFrame = this.prepareCommonFrame(
-                    source.commonFrame != null ? source.commonFrame : state.lastFrame,
-                    index, textTemplate, suffixTemplate, legacy, config);
-            state.lastFrame = source.commonFrame;
+            // The frame a source held before it went idle is still its previous one here, so an
+            // unchanged tag keeps that frame and the text already encoded in it.
+            source.commonFrame = this.prepareCommonFrame(source.commonFrame, index,
+                    textTemplate, suffixTemplate, legacy, config);
         }
         boolean complete = true;
         if (!viewerDependent) {
@@ -348,14 +391,11 @@ public final class RenderTicker {
     /**
      * Keeps the previous frame when nothing changed. A new modern frame encodes its text here,
      * on the ticker, so every viewer copies the same bytes instead of serializing the component.
-     * A previous frame inherited from the owner's legacy definition has no encoded text and is
-     * not reused for a modern one.
      */
     private static Frame frame(Frame previous, int index, Component text, Component suffix, int score,
                                boolean legacy) {
         if (previous != null && previous.index == index && previous.score == score
-                && Objects.equals(previous.text, text) && Objects.equals(previous.suffix, suffix)
-                && (legacy || text == null || previous.encodedText != null)) return previous;
+                && Objects.equals(previous.text, text) && Objects.equals(previous.suffix, suffix)) return previous;
         return new Frame(index, text, suffix, score,
                 legacy || text == null ? null : ModernRenderer.encodeText(text));
     }
@@ -372,7 +412,8 @@ public final class RenderTicker {
         this.closing = true;
         this.executor.execute(() -> {
             this.executor.shutdown();
-            this.animations.clear();
+            this.active.clear();
+            this.sharedClocks.clear();
             this.viewers.clear();
         });
     }
@@ -391,18 +432,17 @@ public final class RenderTicker {
         }
     }
 
-    /** Identity is immutable; source links are ticker-only, latest is published, applied is EventLoop-only. */
+    /** Identity is immutable; the source link is ticker-only, latest is published, applied is EventLoop-only. */
     static final class Subscription {
         final ChannelState viewer;
-        /** State of the owner's connection, where the ticker keeps that owner's last frame. */
+        /** State of the owner's connection, which keeps that owner's sources. */
         final ChannelState owner;
         final int entityId;
         final UUID ownerId;
         final UUID viewerId;
         final ConfigValues config;
         final Object definition;
-        private Animation animation;
-        private OwnerFrames ownerFrames;
+        private Source source;
         /** Complete result for this viewer; no viewer-dependent parts remain unresolved. */
         volatile Frame latest;
         Frame applied;
@@ -446,23 +486,43 @@ public final class RenderTicker {
         }
     }
 
-    private static final class Animation {
-        private final long started;
+    /**
+     * Prepared frames of one owner for one definition. The owner's {@link ChannelState} keeps
+     * the source for the whole connection, also while it has no consumer. A first consumer then
+     * starts it exactly like a new one; only the objects are reused. Ticker thread only.
+     */
+    static final class Source {
+        private final UUID ownerId;
+        private final ConfigValues config;
+        private final Object definition;
+        private final List<Subscription> subscriptions = new ArrayList<>(1);
+        /** Position in the ticker's active list, or -1 while there is no consumer. */
+        private int activeIndex = -1;
+        /** Tick of the first consumer, when every target animates on its own clock. */
+        private long started;
+        /** Clock shared with the other owners of this definition, or null when targets animate separately. */
+        private Clock sharedClock;
+        private long nextTextTick;
         /**
-         * Sources are removed with their last subscription; an empty map ends this clock.
-         * Sized for the single owner of a per-target clock; a shared clock grows as owners join.
+         * Owner-only parts; dependent text/suffix are null and a dependent score is zero until
+         * completion. While idle it only serves to keep an unchanged frame on the next start.
          */
-        private final Map<UUID, OwnerFrames> owners = new HashMap<>(2);
+        private Frame commonFrame;
 
-        private Animation(long started) {
-            this.started = started;
+        private Source(UUID ownerId, ConfigValues config, Object definition) {
+            this.ownerId = ownerId;
+            this.config = config;
+            this.definition = definition;
         }
     }
 
-    private static final class OwnerFrames {
-        private final List<Subscription> subscriptions = new ArrayList<>(1);
-        private long nextTextTick;
-        /** Owner-only parts; dependent text/suffix are null and a dependent score is zero until completion. */
-        private Frame commonFrame;
+    /** Animation start shared by the owners of one definition, with the number of sources on it. */
+    private static final class Clock {
+        private final long started;
+        private int sources;
+
+        private Clock(long started) {
+            this.started = started;
+        }
     }
 }
