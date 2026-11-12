@@ -6,6 +6,7 @@ import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
 import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
 
@@ -17,8 +18,12 @@ public final class PlayerInfoUpdateHandler {
     private static final int GAME_MODE_ACTION = 1 << WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE.ordinal();
     // PacketEvents reads ceil(action count / 8) bytes before the entry count.
     private static final boolean SINGLE_ACTION_BYTE = WrapperPlayServerPlayerInfoUpdate.Action.VALUES.length <= 8;
+    /** A game-mode entry is a UUID and at least one more byte. */
+    private static final int MIN_ENTRY_BYTES = 2 * Long.BYTES + 1;
 
     private final TagManager tags;
+    /** A game mode is advertised to every viewer with the same bytes; it is decoded once. */
+    private final DecodedPackets<GameModes> decoded = new DecodedPackets<>();
 
     /**
      * Connects advertised game modes to the tag manager.
@@ -31,55 +36,75 @@ public final class PlayerInfoUpdateHandler {
      * Reads game-mode changes without changing the outgoing packet.
      */
     public void handle(@NotNull PacketSendEvent event, @NotNull ConfigValues config) {
-        final var previousWrapper = event.getLastUsedWrapper();
-        if (previousWrapper instanceof WrapperPlayServerPlayerInfoUpdate packet) {
-            this.handleDecoded(event, packet, config);
+        final var viewer = (Channel) event.getChannel();
+        if (event.getLastUsedWrapper() instanceof WrapperPlayServerPlayerInfoUpdate packet) {
+            // Another listener decoded this packet and may have edited it; its bytes are stale.
+            if (!packet.getActions().contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE)) return;
+            for (final var entry : packet.getEntries()) {
+                this.tags.updateSpectator(viewer, entry.getProfileId(), entry.getGameMode() == GameMode.SPECTATOR, config);
+            }
             return;
         }
-        if (this.handleNative(event, config)) return;
+        final var buffer = (ByteBuf) event.getByteBuf();
+        final int start = buffer.readerIndex();
+        final int length = buffer.readableBytes();
+        // Profile membership, display-name and latency updates do not affect tags.
+        if (SINGLE_ACTION_BYTE && (length == 0 || (buffer.getByte(start) & GAME_MODE_ACTION) == 0)) return;
+        var modes = this.decoded.find(buffer, start, length);
+        if (modes == null) {
+            modes = this.decode(event, buffer, start);
+            this.decoded.remember(buffer, start, length, modes);
+        }
+        for (int i = 0; i < modes.profiles.length; i++) {
+            this.tags.updateSpectator(viewer, modes.profiles[i], modes.spectator[i], config);
+        }
+    }
 
-        final var buffer = event.getByteBuf();
-        final int readerIndex = ByteBufHelper.readerIndex(buffer);
-        final WrapperPlayServerPlayerInfoUpdate packet;
+    /**
+     * Decodes a packet seen for the first time and leaves the event as it was. A lone game-mode
+     * action is read directly; any other combination goes through PacketEvents' full decoder.
+     */
+    private GameModes decode(PacketSendEvent event, ByteBuf buffer, int start) {
+        final var previousWrapper = event.getLastUsedWrapper();
         try {
-            packet = new WrapperPlayServerPlayerInfoUpdate(event);
+            if (SINGLE_ACTION_BYTE && (buffer.getByte(start) & 0xFF) == GAME_MODE_ACTION) {
+                buffer.readerIndex(start + 1);
+                final int count = ByteBufHelper.readVarInt(buffer);
+                if (count >= 0 && count <= buffer.readableBytes() / MIN_ENTRY_BYTES) {
+                    final var profiles = new UUID[count];
+                    final boolean[] spectator = new boolean[count];
+                    for (int i = 0; i < count; i++) {
+                        profiles[i] = new UUID(buffer.readLong(), buffer.readLong());
+                        spectator[i] = ByteBufHelper.readVarInt(buffer) == GameMode.SPECTATOR.getId();
+                    }
+                    return new GameModes(profiles, spectator);
+                }
+                buffer.readerIndex(start);
+            }
+            final var packet = new WrapperPlayServerPlayerInfoUpdate(event);
+            if (!packet.getActions().contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE)) return GameModes.NONE;
+            final var entries = packet.getEntries();
+            final var profiles = new UUID[entries.size()];
+            final boolean[] spectator = new boolean[profiles.length];
+            for (int i = 0; i < profiles.length; i++) {
+                final var entry = entries.get(i);
+                profiles[i] = entry.getProfileId();
+                spectator[i] = entry.getGameMode() == GameMode.SPECTATOR;
+            }
+            return new GameModes(profiles, spectator);
         } finally {
-            ByteBufHelper.readerIndex(buffer, readerIndex);
+            buffer.readerIndex(start);
+            // Observation must not introduce a packet rewrite or replace earlier edits.
             event.setLastUsedWrapper(previousWrapper);
         }
-        this.handleDecoded(event, packet, config);
     }
 
-    private void handleDecoded(PacketSendEvent event, WrapperPlayServerPlayerInfoUpdate packet, ConfigValues config) {
-        if (!packet.getActions().contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE)) return;
-        final var viewer = (Channel) event.getChannel();
-        for (final var entry : packet.getEntries()) {
-            this.tags.updateSpectator(viewer, entry.getProfileId(), entry.getGameMode() == GameMode.SPECTATOR, config);
-        }
-    }
+    /**
+     * The game modes one packet advertises, as parallel arrays that every viewer shares.
+     * Neither array is modified after decoding.
+     */
+    private record GameModes(UUID[] profiles, boolean[] spectator) {
 
-    /** Returns false when combined actions require PacketEvents' full decoder. */
-    private boolean handleNative(PacketSendEvent event, ConfigValues config) {
-        if (!SINGLE_ACTION_BYTE) return false;
-        final var buffer = event.getByteBuf();
-        final int readerIndex = ByteBufHelper.readerIndex(buffer);
-        try {
-            final int actions = ByteBufHelper.readByte(buffer) & 0xFF;
-            // Profile membership, display-name and latency updates do not affect tags.
-            if ((actions & GAME_MODE_ACTION) == 0) return true;
-            if (actions != GAME_MODE_ACTION) return false;
-
-            final int count = ByteBufHelper.readVarInt(buffer);
-            if (count < 0) return false;
-            final var viewer = (Channel) event.getChannel();
-            for (int i = 0; i < count; i++) {
-                final var uniqueId = new UUID(ByteBufHelper.readLong(buffer), ByteBufHelper.readLong(buffer));
-                final boolean spectator = ByteBufHelper.readVarInt(buffer) == GameMode.SPECTATOR.getId();
-                this.tags.updateSpectator(viewer, uniqueId, spectator, config);
-            }
-            return true;
-        } finally {
-            ByteBufHelper.readerIndex(buffer, readerIndex);
-        }
+        private static final GameModes NONE = new GameModes(new UUID[0], new boolean[0]);
     }
 }
