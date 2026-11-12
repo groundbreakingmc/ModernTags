@@ -9,6 +9,7 @@ import com.github.retrooper.packetevents.PacketEvents;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.jctools.queues.atomic.MpscUnboundedAtomicArrayQueue;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -17,11 +18,13 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 
 /**
@@ -32,13 +35,22 @@ import java.util.logging.Level;
  *
  * <p>A source belongs to one owner and one definition and is kept in that owner's
  * {@link ChannelState}, so a tag that loses its last viewer and gets one back allocates
- * nothing.
+ * nothing. EventLoops hand subscription changes over through one queue; a burst of them
+ * costs one task on this thread rather than one per subscription.
  */
 public final class RenderTicker {
 
     private final ModernTags plugin;
     private final ScheduledThreadPoolExecutor executor;
     private final Runnable tickTask = this::runTick;
+    private final Runnable changeTask = this::applyChanges;
+    /**
+     * Subscriptions added or cancelled on EventLoops, in the order they changed. The array
+     * variant needs neither a node per element nor sun.misc.Unsafe.
+     */
+    private final Queue<Subscription> changes = new MpscUnboundedAtomicArrayQueue<>(256);
+    /** True while a pass over {@link #changes} is scheduled and has not started reading yet. */
+    private final AtomicBoolean changesQueued = new AtomicBoolean();
     private final Set<ChannelState> viewers = new HashSet<>();
     /** Sources that have a consumer, in no particular order; each knows its position here. */
     private final List<Source> active = new ArrayList<>();
@@ -72,12 +84,37 @@ public final class RenderTicker {
 
     /** Adds a consumer and prepares its current result without waiting for the next tick. */
     void subscribe(Subscription subscription) {
-        this.execute(() -> this.add(subscription));
+        this.changed(subscription);
     }
 
     /** Removes a consumer; the last consumer stops its source and animation clock. */
     void unsubscribe(Subscription subscription) {
-        this.execute(() -> this.remove(subscription));
+        subscription.cancelled = true;
+        this.changed(subscription);
+    }
+
+    /** Queues a subscription for this thread and schedules one pass unless one is already waiting. */
+    private void changed(Subscription subscription) {
+        if (this.closing) return;
+        this.changes.offer(subscription);
+        if (this.changesQueued.compareAndSet(false, true)) this.execute(this.changeTask);
+    }
+
+    private void applyChanges() {
+        // Reset before reading: a change offered from now on schedules another pass, and one
+        // offered earlier is still in the queue read below.
+        this.changesQueued.set(false);
+        Subscription subscription;
+        while ((subscription = this.changes.poll()) != null) {
+            try {
+                // A subscription is queued when it starts and again when it is cancelled. If it
+                // was cancelled before its first turn, both turns find nothing to remove.
+                if (subscription.cancelled) this.remove(subscription);
+                else this.add(subscription);
+            } catch (RuntimeException failure) {
+                this.plugin.getLogger().log(Level.WARNING, "Failed to update a tag subscription", failure);
+            }
+        }
     }
 
     private void add(Subscription subscription) {
@@ -432,7 +469,10 @@ public final class RenderTicker {
         }
     }
 
-    /** Identity is immutable; the source link is ticker-only, latest is published, applied is EventLoop-only. */
+    /**
+     * Identity is immutable; the source link is ticker-only, latest is published, applied is
+     * EventLoop-only. The viewer's EventLoop sets cancelled once, before queueing the removal.
+     */
     static final class Subscription {
         final ChannelState viewer;
         /** State of the owner's connection, which keeps that owner's sources. */
@@ -442,6 +482,7 @@ public final class RenderTicker {
         final UUID viewerId;
         final ConfigValues config;
         final Object definition;
+        private volatile boolean cancelled;
         private Source source;
         /** Complete result for this viewer; no viewer-dependent parts remain unresolved. */
         volatile Frame latest;
