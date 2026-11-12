@@ -100,8 +100,9 @@ public final class TagTextResolver {
             case "owner:name" -> (pair, value) -> value.text(pair.owner().getName());
             case "viewer:name" -> (pair, value) -> value.text(pair.viewer().getName());
 
-            case "owner:health" -> (pair, value) -> value.number(NumberUtils.healthToInt(pair.owner().getHealth()));
-            case "viewer:health" -> (pair, value) -> value.number(NumberUtils.healthToInt(pair.viewer().getHealth()));
+            // The shared strings of common health values spare a number-to-text conversion per render.
+            case "owner:health" -> (pair, value) -> value.text(NumberUtils.healthToStr(pair.owner().getHealth()));
+            case "viewer:health" -> (pair, value) -> value.text(NumberUtils.healthToStr(pair.viewer().getHealth()));
 
             case "owner:display_name" -> (pair, value) -> value.component(displayName(pair.owner()));
             case "viewer:display_name" -> (pair, value) -> value.component(displayName(pair.viewer()));
