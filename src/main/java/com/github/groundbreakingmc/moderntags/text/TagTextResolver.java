@@ -27,6 +27,8 @@ public final class TagTextResolver {
 
     private final Logger logger;
     private final @Nullable Chat chat;
+    /** Direct source of prefixes and suffixes when the Vault chat provider is LuckPerms' own. */
+    private final @Nullable LuckPermsMeta luckPerms;
     private final boolean supportsPapi;
 
     /**
@@ -39,6 +41,9 @@ public final class TagTextResolver {
     public TagTextResolver(Logger logger, @Nullable Chat chat, boolean supportsPapi) {
         this.logger = logger;
         this.chat = chat;
+        // LuckPerms registers its Vault provider under this name. LuckPerms is then the source
+        // either way, and asking it directly skips what that provider rebuilds for every call.
+        this.luckPerms = chat != null && "LuckPerms".equals(chat.getName()) ? new LuckPermsMeta() : null;
         this.supportsPapi = supportsPapi;
     }
 
@@ -182,7 +187,12 @@ public final class TagTextResolver {
     private @Nullable Component vaultComponent(@NotNull Player player, boolean prefix, boolean miniMessageVault) {
         if (this.chat == null) return null;
 
-        final String raw = prefix ? this.chat.getPlayerPrefix(player) : this.chat.getPlayerSuffix(player);
+        final String raw;
+        if (this.luckPerms != null) {
+            raw = prefix ? this.luckPerms.prefix(player) : this.luckPerms.suffix(player);
+        } else {
+            raw = prefix ? this.chat.getPlayerPrefix(player) : this.chat.getPlayerSuffix(player);
+        }
         if (raw == null || raw.isEmpty()) return Component.empty();
 
         return miniMessageVault
