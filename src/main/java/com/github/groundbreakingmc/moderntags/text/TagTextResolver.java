@@ -50,6 +50,8 @@ public final class TagTextResolver {
     /** Binds each key and its Vault formatting mode to the configuration that compiled the template. */
     public @NotNull Template compile(@NotNull String pattern, boolean miniMessageVault) {
         final boolean[] viewerDependent = {false};
+        // Owner-only templates are bound per tag source, which bypasses this per-thread result.
+        // Viewer-dependent ones keep it: consecutive viewers of one owner often resolve equal values.
         final var compiled = Text.cacheableOf(pattern, key -> {
             if (dependsOnViewer(key)) {
                 viewerDependent[0] = true;
@@ -249,6 +251,12 @@ public final class TagTextResolver {
         @NotNull Player viewer();
     }
 
+    /**
+     * A compiled text template of one configuration.
+     *
+     * @param compiled the template; bind it to keep one owner's last result
+     * @param viewerDependent whether evaluation needs the actual viewer, including relational placeholders
+     */
     public record Template(@NotNull Text<Context> compiled, boolean viewerDependent) {
     }
 

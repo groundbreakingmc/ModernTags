@@ -1,5 +1,6 @@
 package com.github.groundbreakingmc.moderntags.render;
 
+import com.github.groundbreakingmc.gikymessage.BoundText;
 import com.github.groundbreakingmc.moderntags.ModernTags;
 import com.github.groundbreakingmc.moderntags.config.ConfigValues;
 import com.github.groundbreakingmc.moderntags.config.model.LegacyTag;
@@ -364,7 +365,7 @@ public final class RenderTicker {
             this.players.viewer = owner;
             // The frame a source held before it went idle is still its previous one here, so an
             // unchanged tag keeps that frame and the text already encoded in it.
-            source.commonFrame = this.prepareCommonFrame(source.commonFrame, index,
+            source.commonFrame = this.prepareCommonFrame(source, index,
                     textTemplate, suffixTemplate, legacy, config);
         }
         boolean complete = true;
@@ -387,17 +388,22 @@ public final class RenderTicker {
         }
     }
 
-    /** Resolves owner-only parts with both context players set to the owner by prepare. */
-    private Frame prepareCommonFrame(Frame previous, int index, TagTextResolver.Template textTemplate,
+    /**
+     * Resolves owner-only parts with both context players set to the owner by prepare. They are
+     * rendered through the source's bindings, which return the same component while the owner's
+     * values stay equal, so frame() keeps the previous frame without comparing whole trees.
+     */
+    private Frame prepareCommonFrame(Source source, int index, TagTextResolver.Template textTemplate,
                                      TagTextResolver.Template suffixTemplate, boolean legacy, ConfigValues config) {
-        final var resolver = this.plugin.tagTextResolver();
-        final var text = textTemplate.viewerDependent() ? null : resolver.resolve(this.players, textTemplate);
+        final var text = textTemplate.viewerDependent() ? null
+                : Source.bound(source.texts, index, textTemplate, this.players).render();
         final var suffix = suffixTemplate == null ? Component.empty()
-                : suffixTemplate.viewerDependent() ? null : resolver.resolve(this.players, suffixTemplate);
+                : suffixTemplate.viewerDependent() ? null
+                : Source.bound(source.suffixes, index, suffixTemplate, this.players).render();
         final var belowNameValue = config.belowNameValue();
         final int score = !legacy || belowNameValue.viewerDependent() ? 0
                 : belowNameValue.compiled().applyAsInt(this.players.owner, this.players.owner);
-        return frame(previous, index, text, suffix, score, legacy);
+        return frame(source.commonFrame, index, text, suffix, score, legacy);
     }
 
     /**
@@ -549,11 +555,46 @@ public final class RenderTicker {
          * completion. While idle it only serves to keep an unchanged frame on the next start.
          */
         private Frame commonFrame;
+        /**
+         * Owner-only templates bound per frame index on first use. A binding keeps this owner's
+         * last values and result, so an unchanged tag renders without allocating and keeps the
+         * same component. Only legacy definitions have suffixes.
+         */
+        private final BoundText<TagTextResolver.Context>[] texts;
+        private final BoundText<TagTextResolver.Context> @Nullable [] suffixes;
 
         private Source(UUID ownerId, ConfigValues config, Object definition) {
             this.ownerId = ownerId;
             this.config = config;
             this.definition = definition;
+            if (definition instanceof ModernTag modern) {
+                this.texts = bindings(modern.frames().size());
+                this.suffixes = null;
+            } else {
+                final int frames = ((LegacyTag) definition).frames().size();
+                this.texts = bindings(frames);
+                this.suffixes = bindings(frames);
+            }
+        }
+
+        /**
+         * The binding of a frame's template. The context is the ticker's holder, which prepare
+         * points at this source's owner before every render.
+         */
+        private static BoundText<TagTextResolver.Context> bound(BoundText<TagTextResolver.Context>[] bindings,
+                                                               int index, TagTextResolver.Template template,
+                                                               Players players) {
+            var binding = bindings[index];
+            if (binding == null) {
+                binding = template.compiled().bind(players);
+                bindings[index] = binding;
+            }
+            return binding;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static BoundText<TagTextResolver.Context>[] bindings(int frames) {
+            return (BoundText<TagTextResolver.Context>[]) new BoundText<?>[frames];
         }
     }
 
