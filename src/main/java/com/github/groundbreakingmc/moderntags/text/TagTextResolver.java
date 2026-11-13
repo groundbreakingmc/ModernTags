@@ -17,6 +17,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.ToIntBiFunction;
 import java.util.logging.Logger;
 
@@ -24,6 +25,12 @@ import java.util.logging.Logger;
 public final class TagTextResolver {
 
     private static final ToIntBiFunction<Player, Player> ZERO = (owner, viewer) -> 0;
+    // One instance per format: a binding parses a raw prefix again only for a different string
+    // or parser instance, so the same parser must be reported every time.
+    private static final Function<String, Component> MINI_MESSAGE_VAULT =
+            raw -> raw.isEmpty() ? Component.empty() : MiniMessage.miniMessage().deserialize(raw);
+    private static final Function<String, Component> LEGACY_VAULT =
+            raw -> raw.isEmpty() ? Component.empty() : LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
 
     private final Logger logger;
     private final @Nullable Chat chat;
@@ -109,13 +116,26 @@ public final class TagTextResolver {
             case "owner:display_name" -> (pair, value) -> value.component(displayName(pair.owner()));
             case "viewer:display_name" -> (pair, value) -> value.component(displayName(pair.viewer()));
 
-            case "owner:prefix" -> (pair, value) -> value.component(this.vaultComponent(pair.owner(), true, miniMessageVault));
-            case "owner:suffix" -> (pair, value) -> value.component(this.vaultComponent(pair.owner(), false, miniMessageVault));
-            case "viewer:prefix" -> (pair, value) -> value.component(this.vaultComponent(pair.viewer(), true, miniMessageVault));
-            case "viewer:suffix" -> (pair, value) -> value.component(this.vaultComponent(pair.viewer(), false, miniMessageVault));
+            case "owner:prefix" -> this.bindVault(true, true, miniMessageVault);
+            case "owner:suffix" -> this.bindVault(true, false, miniMessageVault);
+            case "viewer:prefix" -> this.bindVault(false, true, miniMessageVault);
+            case "viewer:suffix" -> this.bindVault(false, false, miniMessageVault);
 
             default -> this.bindTextPapi(key);
         };
+    }
+
+    /**
+     * Reports the raw prefix or suffix with its parser. A binding compares the raw text and
+     * parses it only when it changes; a render without a binding parses it every time.
+     */
+    private @NotNull ValueResolver<Context> bindVault(boolean owner, boolean prefix, boolean miniMessageVault) {
+        // No report: without Vault chat the placeholder stays literal, as with any unknown value.
+        if (this.chat == null) return (pair, value) -> { };
+        final var parser = miniMessageVault ? MINI_MESSAGE_VAULT : LEGACY_VAULT;
+        return owner
+                ? (pair, value) -> value.component(this.vaultRaw(pair.owner(), prefix), parser)
+                : (pair, value) -> value.component(this.vaultRaw(pair.viewer(), prefix), parser);
     }
 
     private @NotNull ValueResolver<Context> bindTextPapi(@NotNull String key) {
@@ -189,18 +209,18 @@ public final class TagTextResolver {
 
     private @Nullable Component vaultComponent(@NotNull Player player, boolean prefix, boolean miniMessageVault) {
         if (this.chat == null) return null;
+        return (miniMessageVault ? MINI_MESSAGE_VAULT : LEGACY_VAULT).apply(this.vaultRaw(player, prefix));
+    }
 
+    /** The player's raw prefix or suffix, empty when there is none. Requires Vault chat. */
+    private @NotNull String vaultRaw(@NotNull Player player, boolean prefix) {
         final String raw;
         if (this.luckPerms != null) {
             raw = prefix ? this.luckPerms.prefix(player) : this.luckPerms.suffix(player);
         } else {
             raw = prefix ? this.chat.getPlayerPrefix(player) : this.chat.getPlayerSuffix(player);
         }
-        if (raw == null || raw.isEmpty()) return Component.empty();
-
-        return miniMessageVault
-                ? MiniMessage.miniMessage().deserialize(raw)
-                : LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+        return raw == null ? "" : raw;
     }
 
     private @NotNull Component unknownPlaceholder(@NotNull String key) {
