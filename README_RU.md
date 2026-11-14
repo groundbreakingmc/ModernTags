@@ -22,7 +22,7 @@
 
 - Работает на **PacketEvents** — весь рендеринг через пакеты, без Bukkit API
 - Сборка компонентов через **[GikyMessage](https://github.com/groundbreakignmc/GikyMessage)** — меньше аллокаций, быстрая замена плейсхолдеров
-- Полная поддержка **Folia** (начиная с версии 1.1) и всех форков Paper (Paper, Purpur и др.)
+- Работает на **Spigot** и **Paper**, включая форки Paper, например Purpur
 
 ## Команды и права
 

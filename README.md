@@ -21,7 +21,7 @@
 
 - Built on **PacketEvents** — all rendering is done through packets, not bukkit APIs
 - Component building via **[GikyMessage](https://github.com/groundbreakignmc/GikyMessage)** — reduces allocations and speeds up placeholder replacement
-- Fully supports **Folia** (since 1.1) and all Paper forks (Paper, Purpur, etc.)
+- Runs on **Spigot** and **Paper**, including Paper forks such as Purpur
 
 ## Commands and Permissions
 
