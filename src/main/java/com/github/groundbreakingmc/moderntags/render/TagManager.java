@@ -92,18 +92,27 @@ public final class TagManager {
     }
 
     /**
-     * Removes the display and team and ends tracking in the recipient's EventLoop.
-     * Unknown IDs are ignored; the map is retained for subsequent spawns.
+     * Removes the team and ends tracking in the recipient's EventLoop, while its native entity
+     * is being removed. Unknown IDs are ignored; the map is retained for subsequent spawns.
+     *
+     * <p>The display is not removed here: the caller adds its entity ID to the native removal
+     * packet, which saves a packet of its own and removes the tag with its owner.
+     *
+     * @param viewer   the recipient's connection
+     * @param entityId the native entity being removed
+     * @return the display the caller must remove in the same packet, or null when there is none
      */
-    public void untrack(@NotNull Channel viewer, int entityId) {
+    public @Nullable ModernDisplay untrack(@NotNull Channel viewer, int entityId) {
         final var state = ChannelState.get(viewer);
-        if (state == null) return;
+        if (state == null) return null;
         final var target = state.targets.get(entityId);
-        if (target == null) return;
+        if (target == null) return null;
         this.stopSubscription(target);
-        target.destroyDisplay(viewer);
         target.destroyTeam(viewer);
         state.targets.remove(entityId);
+        final var display = target.display;
+        target.display = null;
+        return display;
     }
 
     /**
