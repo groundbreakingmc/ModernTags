@@ -53,8 +53,16 @@ final class PacketBytes {
                 + ", ModernTags writes " + ByteBufUtil.hexDump(actual));
     }
 
-    /** Sends a complete packet past PacketEvents' listeners, in the recipient's EventLoop. */
-    static void send(Channel viewer, ByteBuf packet) {
-        PacketEvents.getAPI().getProtocolManager().sendPacketSilently(viewer, packet);
+    /**
+     * Writes a complete packet past PacketEvents' listeners, in the recipient's EventLoop,
+     * without flushing it. A flush per packet is a system call per packet, which a pass over
+     * many tags turns into a burst that delays every connection on the EventLoop.
+     *
+     * <p>Whoever starts the work flushes once at its end: an outgoing native packet is flushed
+     * by its own sender, so packets written while handling it leave together with it; tasks of
+     * our own and handlers of incoming packets call {@link Channel#flush()} when they finish.
+     */
+    static void write(Channel viewer, ByteBuf packet) {
+        PacketEvents.getAPI().getProtocolManager().writePacketSilently(viewer, packet);
     }
 }

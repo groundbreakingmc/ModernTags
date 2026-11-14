@@ -130,6 +130,7 @@ public final class TagManager {
         state.targets.clear();
         if (state.belowName != null) LegacyRenderer.destroyBelowName(viewer);
         ChannelState.discard(viewer);
+        viewer.flush();
     }
 
     private void ensureBelowName(Channel viewer, ConfigValues config) {
@@ -354,6 +355,8 @@ public final class TagManager {
                 this.plugin.getLogger().log(Level.WARNING, "Failed to apply tag update", failure);
             }
         }
+        // One system call for the whole pass; no native packet follows to carry these.
+        channel.flush();
     }
 
     /**
@@ -451,6 +454,7 @@ public final class TagManager {
                 this.refreshTarget(channel, entry.getIntKey(), entry.getValue(), config);
             }
         }
+        channel.flush();
     }
 
     private void stopSubscription(TrackedPlayer target) {
@@ -555,9 +559,10 @@ public final class TagManager {
             if (!this.canRender(viewer, target, config)) {
                 this.stopSubscription(target);
                 target.destroyDisplay(viewer);
-                return;
+            } else {
+                display.attach(viewer, ownerEntityId, target.passengers);
             }
-            display.attach(viewer, ownerEntityId, target.passengers);
+            viewer.flush();
         }, 100, TimeUnit.MILLISECONDS);
     }
 

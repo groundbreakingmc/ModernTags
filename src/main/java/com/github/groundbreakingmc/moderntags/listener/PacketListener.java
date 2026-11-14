@@ -18,6 +18,7 @@ import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import io.netty.channel.Channel;
 import org.jetbrains.annotations.NotNull;
 
 public final class PacketListener extends PacketListenerAbstract {
@@ -64,7 +65,12 @@ public final class PacketListener extends PacketListenerAbstract {
         switch (type) {
             case PLAYER_INPUT -> this.input.handle(event, this.plugin.configValues());
             case ENTITY_ACTION -> this.action.handle(event, this.plugin.configValues());
+            default -> {
+                return;
+            }
         }
+        // No outgoing packet follows to carry what the handlers wrote.
+        ((Channel) event.getChannel()).flush();
     }
 
     /**

@@ -68,17 +68,17 @@ public final class LegacyRenderer {
                                boolean visible) {
         final byte[] hidden = hiddenInfo(prefix, suffix, color, visible);
         if (hidden != null) {
-            PacketBytes.send(viewer, teamPacket(viewer.alloc(), teamName, TeamMode.CREATE, hidden, playerName));
+            PacketBytes.write(viewer, teamPacket(viewer.alloc(), teamName, TeamMode.CREATE, hidden, playerName));
             return;
         }
         final var info = teamInfo(prefix, suffix, color, visible);
         final var packet = new WrapperPlayServerTeams(teamName, TeamMode.CREATE, info, List.of(playerName));
-        PacketEvents.getAPI().getProtocolManager().sendPacketSilently(viewer, packet);
+        PacketEvents.getAPI().getProtocolManager().writePacketSilently(viewer, packet);
     }
 
     /** Removes an existing team in the recipient's EventLoop. The caller clears its state after return. */
     public static void destroy(@NotNull Channel viewer, @NotNull String teamName) {
-        PacketBytes.send(viewer, teamPacket(viewer.alloc(), teamName, TeamMode.REMOVE, NO_INFO, null));
+        PacketBytes.write(viewer, teamPacket(viewer.alloc(), teamName, TeamMode.REMOVE, NO_INFO, null));
     }
 
     /**
@@ -91,37 +91,37 @@ public final class LegacyRenderer {
                                @NotNull NamedTextColor color, boolean visible) {
         final byte[] hidden = hiddenInfo(prefix, suffix, color, visible);
         if (hidden != null) {
-            PacketBytes.send(viewer, teamPacket(viewer.alloc(), teamName, TeamMode.UPDATE, hidden, null));
+            PacketBytes.write(viewer, teamPacket(viewer.alloc(), teamName, TeamMode.UPDATE, hidden, null));
             return;
         }
         final var info = teamInfo(prefix, suffix, color, visible);
         final var packet = new WrapperPlayServerTeams(teamName, TeamMode.UPDATE, info, List.of());
-        PacketEvents.getAPI().getProtocolManager().sendPacketSilently(viewer, packet);
+        PacketEvents.getAPI().getProtocolManager().writePacketSilently(viewer, packet);
     }
 
     /** Creates and displays the viewer's single below-name objective in its EventLoop. */
     public static void createBelowName(@NotNull Channel viewer, @NotNull Component label) {
         final var protocol = PacketEvents.getAPI().getProtocolManager();
-        protocol.sendPacketSilently(viewer, new WrapperPlayServerScoreboardObjective(
+        protocol.writePacketSilently(viewer, new WrapperPlayServerScoreboardObjective(
                 OBJECTIVE_NAME, ObjectiveMode.CREATE, label, RenderType.INTEGER));
-        protocol.sendPacketSilently(viewer, new WrapperPlayServerDisplayScoreboard(2, OBJECTIVE_NAME));
+        protocol.writePacketSilently(viewer, new WrapperPlayServerDisplayScoreboard(2, OBJECTIVE_NAME));
     }
 
     /** Removes our objective and all its scores in the viewer's EventLoop. */
     public static void destroyBelowName(@NotNull Channel viewer) {
-        PacketEvents.getAPI().getProtocolManager().sendPacketSilently(viewer,
+        PacketEvents.getAPI().getProtocolManager().writePacketSilently(viewer,
                 new WrapperPlayServerScoreboardObjective(OBJECTIVE_NAME, ObjectiveMode.REMOVE, null, null));
     }
 
     /** Updates an existing objective's label without recreating its scores. */
     public static void updateBelowName(@NotNull Channel viewer, @NotNull Component label) {
-        PacketEvents.getAPI().getProtocolManager().sendPacketSilently(viewer,
+        PacketEvents.getAPI().getProtocolManager().writePacketSilently(viewer,
                 new WrapperPlayServerScoreboardObjective(OBJECTIVE_NAME, ObjectiveMode.UPDATE, label, RenderType.INTEGER));
     }
 
     /** Sends a resolved score for one owner to the existing below-name objective. */
     public static void updateScore(@NotNull Channel viewer, @NotNull String playerName, int value) {
-        PacketEvents.getAPI().getProtocolManager().sendPacketSilently(viewer,
+        PacketEvents.getAPI().getProtocolManager().writePacketSilently(viewer,
                 new WrapperPlayServerUpdateScore(playerName, Action.CREATE_OR_UPDATE_ITEM,
                         OBJECTIVE_NAME, Optional.of(value)));
     }
@@ -130,9 +130,9 @@ public final class LegacyRenderer {
     public static void removeScore(@NotNull Channel viewer, @NotNull String playerName) {
         final var protocol = PacketEvents.getAPI().getProtocolManager();
         if (PacketEvents.getAPI().getServerManager().getVersion().isNewerThanOrEquals(ServerVersion.V_1_20_3)) {
-            protocol.sendPacketSilently(viewer, new WrapperPlayServerResetScore(playerName, OBJECTIVE_NAME));
+            protocol.writePacketSilently(viewer, new WrapperPlayServerResetScore(playerName, OBJECTIVE_NAME));
         } else {
-            protocol.sendPacketSilently(viewer, new WrapperPlayServerUpdateScore(
+            protocol.writePacketSilently(viewer, new WrapperPlayServerUpdateScore(
                     playerName, Action.REMOVE_ITEM, OBJECTIVE_NAME, Optional.empty()));
         }
     }

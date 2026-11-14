@@ -77,8 +77,8 @@ public final class ModernRenderer {
     public static void spawn(@NotNull Channel viewer, int tagEntityId, @NotNull UUID tagUniqueId,
                              double x, double y, double z,
                              @NotNull CompiledFrame frame, byte @NotNull [] text, byte opacity) {
-        PacketBytes.send(viewer, spawnPacket(viewer.alloc(), tagEntityId, tagUniqueId, x, y, z));
-        PacketBytes.send(viewer, metadataPacket(viewer.alloc(), tagEntityId, frame.properties, text, true, opacity));
+        PacketBytes.write(viewer, spawnPacket(viewer.alloc(), tagEntityId, tagUniqueId, x, y, z));
+        PacketBytes.write(viewer, metadataPacket(viewer.alloc(), tagEntityId, frame.properties, text, true, opacity));
     }
 
     /**
@@ -86,7 +86,7 @@ public final class ModernRenderer {
      * The caller updates its rendering state after this method returns.
      */
     public static void destroy(@NotNull Channel viewer, int tagEntityId) {
-        PacketBytes.send(viewer, destroyPacket(viewer.alloc(), tagEntityId));
+        PacketBytes.write(viewer, destroyPacket(viewer.alloc(), tagEntityId));
     }
 
     /**
@@ -97,7 +97,7 @@ public final class ModernRenderer {
      */
     public static void attach(@NotNull Channel viewer, int ownerEntityId, int tagEntityId,
                               int @NotNull [] passengers) {
-        PacketBytes.send(viewer, attachPacket(viewer.alloc(), ownerEntityId, tagEntityId, passengers));
+        PacketBytes.write(viewer, attachPacket(viewer.alloc(), ownerEntityId, tagEntityId, passengers));
     }
 
     /**
@@ -164,7 +164,7 @@ public final class ModernRenderer {
         } else if (previousFrame.properties == frame.previousProperties) {
             properties = frame.delta;
         } else {
-            PacketBytes.send(viewer, metadataPacket(viewer.alloc(), tagEntityId, frame.properties, text, true, opacity));
+            PacketBytes.write(viewer, metadataPacket(viewer.alloc(), tagEntityId, frame.properties, text, true, opacity));
             return;
         }
 
@@ -172,7 +172,7 @@ public final class ModernRenderer {
         final boolean textChanged = !Arrays.equals(text, previousText);
         final boolean opacityChanged = opacity != previousOpacity;
         if (properties.length == 0 && !textChanged && !opacityChanged) return;
-        PacketBytes.send(viewer, metadataPacket(viewer.alloc(), tagEntityId, properties,
+        PacketBytes.write(viewer, metadataPacket(viewer.alloc(), tagEntityId, properties,
                 textChanged ? text : null, opacityChanged, opacity));
     }
 
