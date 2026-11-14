@@ -1,34 +1,29 @@
 package com.github.groundbreakingmc.moderntags.util;
 
+import net.kyori.adventure.text.Component;
+import org.jetbrains.annotations.NotNull;
+
 public class NumberUtils {
 
-    public static String healthToStr(double health) {
+    /** Shared components of common health values, from 0 to the default maximum of 20. */
+    private static final Component[] HEALTH = new Component[21];
+
+    static {
+        for (int i = 0; i < HEALTH.length; i++) {
+            HEALTH[i] = Component.text(i);
+        }
+    }
+
+    /**
+     * Returns the health shown in tags as unstyled text, rounded up to a whole number.
+     * Common values return shared instances, so rendering them allocates nothing.
+     *
+     * @param health the player's health
+     * @return the text component of the rounded health
+     */
+    public static @NotNull Component healthToComponent(double health) {
         final int normalized = healthToInt(health);
-        // Reuse string literals for common health values.
-        return switch (normalized) {
-            case 0 -> "0";
-            case 1 -> "1";
-            case 2 -> "2";
-            case 3 -> "3";
-            case 4 -> "4";
-            case 5 -> "5";
-            case 6 -> "6";
-            case 7 -> "7";
-            case 8 -> "8";
-            case 9 -> "9";
-            case 10 -> "10";
-            case 11 -> "11";
-            case 12 -> "12";
-            case 13 -> "13";
-            case 14 -> "14";
-            case 15 -> "15";
-            case 16 -> "16";
-            case 17 -> "17";
-            case 18 -> "18";
-            case 19 -> "19";
-            case 20 -> "20";
-            default -> Integer.toString(normalized);
-        };
+        return normalized >= 0 && normalized < HEALTH.length ? HEALTH[normalized] : Component.text(normalized);
     }
 
     public static int healthToInt(double health) {
