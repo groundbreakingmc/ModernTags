@@ -200,10 +200,13 @@ public final class TagManager {
                                @Nullable Boolean invisible, @Nullable Boolean sneaking, @NotNull ConfigValues config) {
         final var target = this.tracked(viewer, entityId);
         if (target == null) return;
-        final boolean visibilityChanged = invisible != null && target.invisible != invisible;
-        if (invisible != null) target.invisible = invisible;
         if (sneaking != null) target.sneaking = sneaking;
-        if (visibilityChanged) this.refreshTarget(viewer, entityId, target, config);
+        if (invisible != null && target.invisible != invisible) {
+            // A spectator viewer sees invisible players, so only a changed verdict needs a new selection.
+            final boolean rendered = this.canRender(viewer, target, config);
+            target.invisible = invisible;
+            if (rendered != this.canRender(viewer, target, config)) this.refreshTarget(viewer, entityId, target, config);
+        }
         // A pending selection returns before hiding, so an invisible target is hidden here as well.
         if (target.invisible && !this.canRender(viewer, target, config)) target.hideTag(viewer);
         else if (target.display != null && sneaking != null) target.display.updateSneaking(viewer, target.sneaking);
@@ -243,8 +246,9 @@ public final class TagManager {
      * Records an advertised game mode and refreshes matching tracked players in the
      * recipient's EventLoop. Profile additions/removals do not affect tag visibility.
      * The last advertised mode survives native despawn and profile refreshes.
-     * A change of the recipient's own spectator mode refreshes every tracked player,
-     * since a spectator also sees invisible and spectator players.
+     * Only players whose visibility verdict may change are refreshed: a spectator also sees
+     * invisible and spectator players, so a change of the recipient's own mode refreshes
+     * those and itself, while other players' modes do not matter to a spectator recipient.
      *
      * @param viewer   the recipient's connection
      * @param viewerId the recipient's own profile ID, or null when not known yet
@@ -252,17 +256,20 @@ public final class TagManager {
      */
     public void updateSpectator(@NotNull Channel viewer, @Nullable UUID viewerId, @NotNull UUID ownerId,
                                 boolean spectator, @NotNull ConfigValues config) {
-        this.setSpectatorProfile(viewer, ownerId, spectator);
+        final boolean modeChanged = this.setSpectatorProfile(viewer, ownerId, spectator);
         final boolean self = ownerId.equals(viewerId);
         final var state = self && spectator ? ChannelState.of(viewer, this) : ChannelState.get(viewer);
         if (state == null) return;
         final boolean viewerChanged = self && (state.spectatorSelf != null) != spectator;
         if (self) state.spectatorSelf = spectator ? ownerId : null;
+        if (!viewerChanged && (!modeChanged || state.spectatorSelf != null)) return;
+        final var spectators = state.spectators;
         final var iterator = Int2ObjectMaps.fastIterator(state.targets);
         while (iterator.hasNext()) {
             final var entry = iterator.next();
             final var target = entry.getValue();
-            if (!viewerChanged && !target.ownerId.equals(ownerId)) continue;
+            if (!target.ownerId.equals(ownerId) && (!viewerChanged || !target.invisible
+                    && (spectators == null || !spectators.contains(target.ownerId)))) continue;
             this.refreshTarget(viewer, entry.getIntKey(), target, config);
         }
     }
@@ -569,15 +576,15 @@ public final class TagManager {
         return filtered;
     }
 
-    private void setSpectatorProfile(Channel viewer, UUID ownerId, boolean spectator) {
+    /** Records the advertised mode and returns whether it differs from the previous one. */
+    private boolean setSpectatorProfile(Channel viewer, UUID ownerId, boolean spectator) {
         final var state = spectator ? ChannelState.of(viewer, this) : ChannelState.get(viewer);
-        if (state == null) return;
+        if (state == null) return false;
         if (spectator) {
             if (state.spectators == null) state.spectators = new ObjectOpenHashSet<>();
-            state.spectators.add(ownerId);
-        } else if (state.spectators != null) {
-            state.spectators.remove(ownerId);
+            return state.spectators.add(ownerId);
         }
+        return state.spectators != null && state.spectators.remove(ownerId);
     }
 
     private TrackedPlayer getOrCreate(Channel viewer, int entityId, UUID ownerId) {
