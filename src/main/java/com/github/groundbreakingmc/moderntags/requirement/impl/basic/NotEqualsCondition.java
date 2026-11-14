@@ -22,8 +22,6 @@ public final class NotEqualsCondition implements Condition {
 
     @Override
     public boolean test(@NotNull Player player) {
-        final var left = this.left.value(player);
-        final var right = this.right.value(player);
-        return left == null || right == null ? left != right : !left.equals(right);
+        return !Comparison.equal(this.left.value(player), this.right.value(player));
     }
 }

@@ -15,15 +15,6 @@ public final class BooleanCondition implements Condition {
 
     @Override
     public boolean test(@NotNull Player player) {
-        final var value = this.provider.value(player);
-
-        if (value instanceof Boolean booleanValue) {
-            return booleanValue;
-        }
-
-        throw new IllegalStateException(
-                "Expected boolean value but got: " +
-                        (value == null ? "null" : value.getClass().getSimpleName())
-        );
+        return Comparison.truth(this.provider.value(player));
     }
 }
