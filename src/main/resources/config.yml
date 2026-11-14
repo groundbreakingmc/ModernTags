@@ -15,9 +15,11 @@ updates:
 
 # Parse Vault prefix/suffix placeholders using MiniMessage format.
 # If false, treated as legacy (&-formatted) strings.
+# Tag templates always use GikyMessage; this only changes Vault values.
 # ──
 # Парсить плейсхолдеры Vault через MiniMessage.
 # false — обрабатывать как legacy (&-форматирование).
+# Шаблоны тегов всегда используют GikyMessage; настройка меняет только значения Vault.
 vault-mm-formatting: false
 
 # Hide the tag when another entity sits on the player.

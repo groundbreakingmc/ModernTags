@@ -35,9 +35,9 @@ frames:
     # Яркость: "block-<0-15>" или "sky-<0-15>".
     brightness: "block-15"
 
-    # View range in blocks (float).
+    # View range multiplier (float); 1.0 is about 64 blocks with default client settings.
     # ──
-    # Дальность видимости в блоках (float).
+    # Множитель дальности видимости (float); 1.0 — около 64 блоков при стандартных настройках клиента.
     view-range: 1.0
 
     # Shadow parameters (float).
