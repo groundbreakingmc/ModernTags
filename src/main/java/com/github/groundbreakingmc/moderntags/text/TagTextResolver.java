@@ -31,6 +31,13 @@ public final class TagTextResolver {
             raw -> raw.isEmpty() ? Component.empty() : MiniMessage.miniMessage().deserialize(raw);
     private static final Function<String, Component> LEGACY_VAULT =
             raw -> raw.isEmpty() ? Component.empty() : LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
+    private static final LegacyComponentSerializer AMPERSAND_COLORS =
+            LegacyComponentSerializer.builder().character('&').hexColors().build();
+    private static final LegacyComponentSerializer SECTION_COLORS =
+            LegacyComponentSerializer.builder().character('§').hexColors().build();
+    /** PlaceholderAPI expansions color their values with either character, &#RRGGBB included. */
+    private static final Function<String, Component> PAPI_COLORS =
+            raw -> (raw.indexOf('§') >= 0 ? SECTION_COLORS : AMPERSAND_COLORS).deserialize(raw);
 
     private final Logger logger;
     private final @Nullable Chat chat;
@@ -141,7 +148,13 @@ public final class TagTextResolver {
     private @NotNull ValueResolver<Context> bindTextPapi(@NotNull String key) {
         final var provider = this.bindPapi(key);
         if (provider != null) {
-            return (pair, value) -> value.text(provider.apply(pair.owner(), pair.viewer()));
+            return (pair, value) -> {
+                final String raw = provider.apply(pair.owner(), pair.viewer());
+                // Plain text is reported as it is; colored text is parsed, which a binding
+                // repeats only when the string changes.
+                if (raw == null || raw.indexOf('&') < 0 && raw.indexOf('§') < 0) value.text(raw);
+                else value.component(raw, PAPI_COLORS);
+            };
         }
 
         final Component fallback = this.unknownPlaceholder(key);
