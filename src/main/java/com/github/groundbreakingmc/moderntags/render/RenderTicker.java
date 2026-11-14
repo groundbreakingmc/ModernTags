@@ -45,6 +45,7 @@ public final class RenderTicker {
     private final ScheduledThreadPoolExecutor executor;
     private final Runnable tickTask = this::runTick;
     private final Runnable changeTask = this::applyChanges;
+    private final Runnable wakeTask = () -> this.execute(this.changeTask);
     /**
      * Subscriptions added or cancelled on EventLoops, in the order they changed. The array
      * variant needs neither a node per element nor sun.misc.Unsafe.
@@ -98,7 +99,20 @@ public final class RenderTicker {
     private void changed(Subscription subscription) {
         if (this.closing) return;
         this.changes.offer(subscription);
-        if (this.changesQueued.compareAndSet(false, true)) this.execute(this.changeTask);
+        if (!this.changesQueued.compareAndSet(false, true)) return;
+        // Waking this thread is a system call, and it drains the queue faster than one pass
+        // fills it. Waking it after the EventLoop's current task lets a pass that changes many
+        // subscriptions, such as a viewer turning spectator, wake it once.
+        final var loop = subscription.viewer.channel.eventLoop();
+        if (loop.inEventLoop()) {
+            try {
+                loop.execute(this.wakeTask);
+                return;
+            } catch (RejectedExecutionException ignored) {
+                // A closing EventLoop runs no more tasks; wake this thread directly.
+            }
+        }
+        this.execute(this.changeTask);
     }
 
     private void applyChanges() {
