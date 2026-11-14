@@ -64,6 +64,12 @@ final class ChannelState {
      * Viewer EventLoop only.
      */
     @Nullable Set<UUID> spectators;
+    /**
+     * This connection's own profile ID while it was last advertised to itself in spectator mode,
+     * otherwise null. Such a viewer sees invisible and spectator players with their tags, as in
+     * vanilla, but not its own. Viewer EventLoop only.
+     */
+    @Nullable UUID spectatorSelf;
     /** Team colors and membership advertised to this connection, created on first use. Viewer EventLoop only. */
     TagManager.@Nullable SourceTeams teams;
     /** Current below-name label of our objective, or null when it does not exist. Viewer EventLoop only. */

@@ -40,8 +40,10 @@ public final class PlayerInfoUpdateHandler {
         if (event.getLastUsedWrapper() instanceof WrapperPlayServerPlayerInfoUpdate packet) {
             // Another listener decoded this packet and may have edited it; its bytes are stale.
             if (!packet.getActions().contains(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_GAME_MODE)) return;
+            final var viewerId = event.getUser().getUUID();
             for (final var entry : packet.getEntries()) {
-                this.tags.updateSpectator(viewer, entry.getProfileId(), entry.getGameMode() == GameMode.SPECTATOR, config);
+                this.tags.updateSpectator(viewer, viewerId, entry.getProfileId(),
+                        entry.getGameMode() == GameMode.SPECTATOR, config);
             }
             return;
         }
@@ -55,8 +57,9 @@ public final class PlayerInfoUpdateHandler {
             modes = this.decode(event, buffer, start);
             this.decoded.remember(buffer, start, length, modes);
         }
+        final var viewerId = event.getUser().getUUID();
         for (int i = 0; i < modes.profiles.length; i++) {
-            this.tags.updateSpectator(viewer, modes.profiles[i], modes.spectator[i], config);
+            this.tags.updateSpectator(viewer, viewerId, modes.profiles[i], modes.spectator[i], config);
         }
     }
 

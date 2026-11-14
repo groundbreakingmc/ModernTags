@@ -204,7 +204,8 @@ public final class TagManager {
         if (invisible != null) target.invisible = invisible;
         if (sneaking != null) target.sneaking = sneaking;
         if (visibilityChanged) this.refreshTarget(viewer, entityId, target, config);
-        if (target.invisible) target.hideTag(viewer);
+        // A pending selection returns before hiding, so an invisible target is hidden here as well.
+        if (target.invisible && !this.canRender(viewer, target, config)) target.hideTag(viewer);
         else if (target.display != null && sneaking != null) target.display.updateSneaking(viewer, target.sneaking);
     }
 
@@ -242,28 +243,28 @@ public final class TagManager {
      * Records an advertised game mode and refreshes matching tracked players in the
      * recipient's EventLoop. Profile additions/removals do not affect tag visibility.
      * The last advertised mode survives native despawn and profile refreshes.
+     * A change of the recipient's own spectator mode refreshes every tracked player,
+     * since a spectator also sees invisible and spectator players.
+     *
+     * @param viewer   the recipient's connection
+     * @param viewerId the recipient's own profile ID, or null when not known yet
+     * @param ownerId  the profile whose game mode is advertised
      */
-    public void updateSpectator(@NotNull Channel viewer, @NotNull UUID ownerId,
+    public void updateSpectator(@NotNull Channel viewer, @Nullable UUID viewerId, @NotNull UUID ownerId,
                                 boolean spectator, @NotNull ConfigValues config) {
         this.setSpectatorProfile(viewer, ownerId, spectator);
-        final var state = ChannelState.get(viewer);
+        final boolean self = ownerId.equals(viewerId);
+        final var state = self && spectator ? ChannelState.of(viewer, this) : ChannelState.get(viewer);
         if (state == null) return;
+        final boolean viewerChanged = self && (state.spectatorSelf != null) != spectator;
+        if (self) state.spectatorSelf = spectator ? ownerId : null;
         final var iterator = Int2ObjectMaps.fastIterator(state.targets);
         while (iterator.hasNext()) {
             final var entry = iterator.next();
             final var target = entry.getValue();
-            if (!target.ownerId.equals(ownerId)) continue;
+            if (!viewerChanged && !target.ownerId.equals(ownerId)) continue;
             this.refreshTarget(viewer, entry.getIntKey(), target, config);
         }
-    }
-
-    /**
-     * Returns the spectator mode advertised to this recipient, including before
-     * native spawn. Access belongs to the recipient's EventLoop.
-     */
-    public boolean isSpectatorProfile(@NotNull Channel viewer, @NotNull UUID ownerId) {
-        final var state = ChannelState.get(viewer);
-        return state != null && state.spectators != null && state.spectators.contains(ownerId);
     }
 
     /**
@@ -527,10 +528,17 @@ public final class TagManager {
         return state == null ? null : state.targets.get(entityId);
     }
 
+    /**
+     * Whether the target's tag may be shown to this viewer. As in vanilla, a spectator viewer
+     * sees invisible and spectator players with their tags; other viewers see neither. A
+     * spectator's own tag stays hidden: it would follow the camera while spectating someone.
+     */
     private boolean canRender(Channel viewer, TrackedPlayer target, ConfigValues config) {
-        return !target.dead && !target.invisible
-                && !this.isSpectatorProfile(viewer, target.ownerId)
-                && (!config.hideTagWhenHasPassenger() || target.passengers.length == 0);
+        if (target.dead || config.hideTagWhenHasPassenger() && target.passengers.length != 0) return false;
+        final var state = ChannelState.get(viewer);
+        if (state == null) return !target.invisible;
+        if (state.spectatorSelf != null) return !target.ownerId.equals(state.spectatorSelf);
+        return !target.invisible && (state.spectators == null || !state.spectators.contains(target.ownerId));
     }
 
     private void scheduleAttachment(Channel viewer, int ownerEntityId, TrackedPlayer target, ConfigValues config) {
