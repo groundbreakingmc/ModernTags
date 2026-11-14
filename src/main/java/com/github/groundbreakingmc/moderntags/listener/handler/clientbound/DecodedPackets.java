@@ -19,8 +19,14 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
  */
 final class DecodedPackets<T> {
 
-    /** Number of remembered packets, a power of two. A packet keeps its slot until another one hashes to it. */
-    private static final int SLOTS = 32;
+    /**
+     * Number of remembered packets, a power of two. A packet keeps its slot until another one
+     * hashes to it. The copies of one broadcast reach the EventLoops at different times, so
+     * several broadcasts are in flight together. With 32 slots they evicted each other: 50
+     * players under constant team changes still decoded 46 MB of team packets in 5 minutes.
+     * A slot holds only a small copy.
+     */
+    private static final int SLOTS = 256;
     /** Longer packets are decoded every time instead of being copied here. */
     private static final int MAX_LENGTH = 4096;
 
