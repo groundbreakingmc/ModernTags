@@ -86,7 +86,7 @@ public final class TagManager {
         target.passengers = IntArrays.EMPTY_ARRAY;
         if (target.display != null) {
             target.display.updateSneaking(viewer, false);
-            this.scheduleAttachment(viewer, entityId, target, config);
+            this.attachAfterSpawn(viewer, entityId, target, config);
         }
         this.refreshTarget(viewer, entityId, target, config);
     }
@@ -516,7 +516,8 @@ public final class TagManager {
         final double z = location == null ? owner.getZ() : location.getZ();
         target.display = new ModernDisplay(channel, identity.tagEntityId, identity.tagUniqueId,
                 x, y + 1.8, z, frame, text, opacity);
-        this.scheduleAttachment(channel, subscription.entityId, target, subscription.config);
+        // This pass runs after the owner's native spawn was written, so the client knows it.
+        target.display.attach(channel, subscription.entityId, target.passengers);
         return true;
     }
 
@@ -561,9 +562,14 @@ public final class TagManager {
         return !target.invisible && (state.spectators == null || !state.spectators.contains(target.ownerId));
     }
 
-    private void scheduleAttachment(Channel viewer, int ownerEntityId, TrackedPlayer target, ConfigValues config) {
+    /**
+     * Reattaches a surviving display once the native spawn being handled has been written.
+     * Packets written now would reach the client before the spawn, which ignores passengers
+     * of an entity it does not know; a task queued now runs right after that write.
+     */
+    private void attachAfterSpawn(Channel viewer, int ownerEntityId, TrackedPlayer target, ConfigValues config) {
         final var display = target.display;
-        viewer.eventLoop().schedule(() -> {
+        viewer.eventLoop().execute(() -> {
             if (!viewer.isActive() || this.tracked(viewer, ownerEntityId) != target || target.display != display) return;
             if (!this.canRender(viewer, target, config)) {
                 this.stopSubscription(target);
@@ -572,7 +578,7 @@ public final class TagManager {
                 display.attach(viewer, ownerEntityId, target.passengers);
             }
             viewer.flush();
-        }, 100, TimeUnit.MILLISECONDS);
+        });
     }
 
     private static int[] withoutPassenger(int[] passengers, int entityId) {
