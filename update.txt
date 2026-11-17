@@ -1,4 +1,4 @@
-2.2.0->https://github.com/groundbreakingmc/ModernTags/releases/download/v2.2.0/ModernTags-2.2.0.jar
-Added update checks, downloads and bStats metrics.
-Modern tags on invisible players are now visible to spectator viewers (GM3), just like vanilla names.
-Fixed spectator and legacy tag visibility, and default name flashes on reload or death.
+3.0.0->https://github.com/groundbreakingmc/ModernTags/releases/download/v3.0.0/ModernTags-3.0.0.jar
+Tags now take much less CPU, memory and traffic, and no longer cause ping spikes.
+Conditions compare numbers by value, and PlaceholderAPI values keep their colors.
+GikyMessage 1.0.0-rc.2: if/else branches; three-digit hex codes are gone. Folia support is dropped.
